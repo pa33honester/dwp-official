@@ -6,6 +6,7 @@ import { LLCAccountStep } from "@/components/forms/LLCAccountStep";
 import { LLCDetailsStep } from "@/components/forms/LLCDetailsStep";
 import { WalletSetupStep } from "@/components/forms/WalletSetupStep";
 import { BothConfirmation } from "@/components/forms/BothConfirmation";
+import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import type {
   LLCAccount,
   LLCDetails,
@@ -32,37 +33,39 @@ export default function BothSignupPage() {
     if (!account || !details) return;
     setSubmitting(true);
     setError(null);
+    const supabase = createSupabaseBrowserClient();
     try {
-      await Promise.all([
-        fetch("/api/llc", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ account, details, combined: true }),
-        }),
-        fetch("/api/wallet", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            account: {
-              fullName: account.fullName,
-              dateOfBirth: account.dateOfBirth,
-              email: account.email,
-              phone: account.phone,
-              memorablePhrase: "",
-              password: account.password,
-              confirmPassword: account.confirmPassword,
-            },
+      const { data, error: invokeError } = await supabase.functions.invoke(
+        "signup-application",
+        {
+          body: {
+            type: "both",
+            account,
+            details,
             setup: walletValues,
-            combined: true,
-          }),
-        }),
-      ]);
+          },
+        },
+      );
+      if (invokeError || !(data as { ok?: boolean })?.ok) {
+        throw new Error(invokeError?.message ?? "Submission failed");
+      }
+      const { error: signInError } = await supabase.auth.signInWithPassword({
+        email: account.email,
+        password: account.password,
+      });
+      if (signInError) {
+        console.warn("signInWithPassword failed", signInError);
+      }
       setWallet(walletValues);
       setSubmitted(true);
       setStep(2);
     } catch (err) {
       console.error(err);
-      setError("Submission failed. Please try again.");
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Submission failed. Please try again.",
+      );
     } finally {
       setSubmitting(false);
     }

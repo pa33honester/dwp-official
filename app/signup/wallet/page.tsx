@@ -6,10 +6,8 @@ import { ApplicationShell } from "@/components/ApplicationShell";
 import { WalletAccountStep } from "@/components/forms/WalletAccountStep";
 import { WalletSetupStep } from "@/components/forms/WalletSetupStep";
 import { WalletApprovalStep } from "@/components/forms/WalletApprovalStep";
-import type {
-  WalletAccount,
-  WalletSetup,
-} from "@/lib/validation/schemas";
+import { createSupabaseBrowserClient } from "@/lib/supabase/client";
+import type { WalletAccount, WalletSetup } from "@/lib/validation/schemas";
 
 const STEPS = [
   { label: "Account Setup" },
@@ -23,22 +21,40 @@ export default function WalletSignupPage() {
   const [account, setAccount] = useState<WalletAccount | undefined>();
   const [setup, setSetup] = useState<WalletSetup | undefined>();
   const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   async function submitAll(setupValues: WalletSetup) {
     if (!account) return;
     setError(null);
+    setSubmitting(true);
+    const supabase = createSupabaseBrowserClient();
     try {
-      await fetch("/api/wallet", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ account, setup: setupValues }),
+      const { data, error: invokeError } = await supabase.functions.invoke(
+        "signup-application",
+        { body: { type: "wallet", account, setup: setupValues } },
+      );
+      if (invokeError || !(data as { ok?: boolean })?.ok) {
+        throw new Error(invokeError?.message ?? "Submission failed");
+      }
+      const { error: signInError } = await supabase.auth.signInWithPassword({
+        email: account.email,
+        password: account.password,
       });
+      if (signInError) {
+        console.warn("signInWithPassword failed", signInError);
+      }
+      setSetup(setupValues);
+      setStep(2);
     } catch (err) {
       console.error(err);
-      setError("Submission failed. You can still continue — we saved your progress locally.");
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Submission failed. Please try again.",
+      );
+    } finally {
+      setSubmitting(false);
     }
-    setSetup(setupValues);
-    setStep(2);
   }
 
   return (
@@ -68,6 +84,11 @@ export default function WalletSignupPage() {
           onBack={() => setStep(0)}
           onSubmit={submitAll}
         />
+      )}
+      {step === 1 && submitting && (
+        <p className="mt-6 text-center text-sm text-zinc-400">
+          Creating your wallet…
+        </p>
       )}
       {step === 2 && (
         <WalletApprovalStep onSkip={() => router.push("/dashboard")} />

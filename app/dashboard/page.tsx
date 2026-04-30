@@ -1,10 +1,51 @@
-import { CryptoDepositGrid } from "@/components/CryptoDepositGrid";
+"use client";
 
-export const metadata = {
-  title: "Portfolio — DigitalWealth Partners",
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { CryptoDepositGrid } from "@/components/CryptoDepositGrid";
+import { createSupabaseBrowserClient } from "@/lib/supabase/client";
+
+type WalletApplication = {
+  vault_name: string | null;
+  connected_address: string | null;
 };
 
 export default function DashboardPage() {
+  const router = useRouter();
+  const [ready, setReady] = useState(false);
+  const [wallet, setWallet] = useState<WalletApplication | null>(null);
+
+  useEffect(() => {
+    const supabase = createSupabaseBrowserClient();
+    supabase.auth.getSession().then(async ({ data }) => {
+      if (!data.session) {
+        router.replace("/login");
+        return;
+      }
+      const { data: row } = await supabase
+        .from("wallet_applications")
+        .select("vault_name, connected_address")
+        .eq("user_id", data.session.user.id)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      setWallet(row as WalletApplication | null);
+      setReady(true);
+    });
+  }, [router]);
+
+  if (!ready) {
+    return (
+      <main className="mx-auto max-w-7xl px-6 py-12">
+        <div className="h-8 w-48 animate-pulse rounded bg-elevated" />
+        <div className="mt-4 h-12 w-64 animate-pulse rounded bg-elevated" />
+        <div className="mt-10 h-40 animate-pulse rounded-2xl bg-elevated/50" />
+      </main>
+    );
+  }
+
+  const connected = Boolean(wallet?.connected_address);
+
   return (
     <main className="mx-auto max-w-7xl px-6 py-12">
       <div className="flex flex-col gap-2">
@@ -19,7 +60,12 @@ export default function DashboardPage() {
             </p>
           </div>
           <div className="rounded-md border border-border bg-elevated px-3 py-1.5 text-xs text-zinc-400">
-            Wallet: <span className="text-gold">Not connected</span>
+            Wallet:{" "}
+            <span className="text-gold">
+              {connected
+                ? `${wallet?.connected_address?.slice(0, 6)}…${wallet?.connected_address?.slice(-4)}`
+                : "Not connected"}
+            </span>
           </div>
         </div>
       </div>

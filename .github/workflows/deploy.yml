@@ -1,8 +1,8 @@
-name: Deploy to Hostinger
+name: Build and deploy static site via FTP
 
 on:
   push:
-    branches: [main]
+    branches: [master, main]
   workflow_dispatch:
 
 concurrency:
@@ -12,7 +12,7 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -29,69 +29,27 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      - name: Build
+      - name: Build static export
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
           NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: ${{ secrets.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID }}
         run: npm run build
 
-      - name: Reinstall production-only dependencies
-        run: |
-          rm -rf node_modules
-          npm ci --omit=dev
-
-      - name: Package release
-        run: |
-          tar czf release.tgz \
-            .next \
-            public \
-            package.json \
-            package-lock.json \
-            next.config.ts \
-            app.js \
-            node_modules
-
-      - name: Upload to Hostinger
-        uses: appleboy/scp-action@v0.1.7
+      - name: Deploy via FTP
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
         with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_KEY }}
-          port: ${{ secrets.SSH_PORT }}
-          source: "release.tgz"
-          target: "${{ secrets.APP_ROOT }}/_releases"
-
-      - name: Activate release
-        uses: appleboy/ssh-action@v1.2.0
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_KEY }}
-          port: ${{ secrets.SSH_PORT }}
-          script: |
-            set -euo pipefail
-            APP_ROOT="${{ secrets.APP_ROOT }}"
-            STAMP=$(date -u +%Y%m%d-%H%M%S)
-            REL_DIR="$APP_ROOT/_releases/$STAMP"
-
-            mkdir -p "$REL_DIR" "$APP_ROOT/tmp"
-            tar xzf "$APP_ROOT/_releases/release.tgz" -C "$REL_DIR"
-            rm "$APP_ROOT/_releases/release.tgz"
-
-            # Sync the new release into the live app root.
-            # Passenger reads from APP_ROOT directly, so we mirror the staged
-            # release on top of it. tmp/, _releases/, and .env are preserved.
-            rsync -a --delete \
-              --exclude=tmp \
-              --exclude=_releases \
-              --exclude=.env \
-              --exclude=.env.local \
-              "$REL_DIR/" "$APP_ROOT/"
-
-            # Tell Passenger to spawn a fresh worker on the next request
-            touch "$APP_ROOT/tmp/restart.txt"
-
-            # Keep the last 3 staged releases for quick rollback
-            cd "$APP_ROOT/_releases"
-            ls -1tr | grep -E '^[0-9]{8}-[0-9]{6}$' | head -n -3 | xargs -r rm -rf
+          server: ${{ secrets.FTP_SERVER }}
+          username: ${{ secrets.FTP_USERNAME }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          server-dir: ${{ secrets.FTP_SERVER_DIR }}
+          protocol: ${{ vars.FTP_PROTOCOL || 'ftps' }}
+          port: ${{ vars.FTP_PORT || 21 }}
+          local-dir: ./out/
+          # Wipe server-dir before upload — guarantees old files are removed.
+          # cPanel's public_html should contain only the deployed site.
+          dangerous-clean-slate: true
+          exclude: |
+            **/.git*
+            **/.git*/**
+            **/node_modules/**
