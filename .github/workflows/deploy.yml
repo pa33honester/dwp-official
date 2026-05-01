@@ -37,6 +37,8 @@ jobs:
         run: npm run build
 
       - name: Deploy via FTP (delta sync)
+        id: deploy
+        continue-on-error: true
         uses: SamKirkland/FTP-Deploy-Action@v4.3.5
         with:
           server: ${{ secrets.FTP_SERVER }}
@@ -46,11 +48,9 @@ jobs:
           protocol: ${{ vars.FTP_PROTOCOL || 'ftps' }}
           port: ${{ vars.FTP_PORT || 21 }}
           local-dir: ./out/
-          # Single FTPS connection with command pipelining — much faster than
-          # lftp's serialized mode and stays well under cPanel's 8-conn cap.
-          # state-name persists a manifest on the server so subsequent
-          # deploys only push changed files. log-level: verbose surfaces the
-          # exact failure mode if something does go wrong.
+          # state-name persists a manifest on the server; subsequent runs
+          # only re-upload files whose hashes changed. Single FTPS connection
+          # so we stay well under cPanel's 8-conn cap.
           state-name: .ftp-deploy-sync-state.json
           log-level: verbose
           timeout: 120000
@@ -58,3 +58,48 @@ jobs:
             **/.git*
             **/.git*/**
             **/node_modules/**
+
+      - name: Retry FTP deploy (delta sync)
+        if: steps.deploy.outcome == 'failure'
+        id: deploy_retry
+        continue-on-error: true
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ secrets.FTP_SERVER }}
+          username: ${{ secrets.FTP_USERNAME }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          server-dir: ${{ secrets.FTP_SERVER_DIR }}
+          protocol: ${{ vars.FTP_PROTOCOL || 'ftps' }}
+          port: ${{ vars.FTP_PORT || 21 }}
+          local-dir: ./out/
+          state-name: .ftp-deploy-sync-state.json
+          log-level: verbose
+          timeout: 120000
+          exclude: |
+            **/.git*
+            **/.git*/**
+            **/node_modules/**
+
+      - name: Verify deployment
+        env:
+          SITE_URL: ${{ vars.SITE_URL || 'https://dwpofficial.org' }}
+        run: |
+          set -e
+          fail=0
+          # HTML routes
+          for path in / /about-us/ /services/ /blog/ /digital-asset-custody/; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" "$SITE_URL$path")
+            printf "%-3s  %s\n" "$code" "$path"
+            [ "$code" = "200" ] || fail=1
+          done
+          # Critical assets that must be present
+          for path in /dwp-logo.jpeg /team/max-kahn.jpg /blog/max-kahn-ceo.jpg; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" "$SITE_URL$path")
+            printf "%-3s  %s\n" "$code" "$path"
+            [ "$code" = "200" ] || fail=1
+          done
+          if [ "$fail" != "0" ]; then
+            echo "::error::Deployment incomplete — one or more routes/assets are missing"
+            exit 1
+          fi
+          echo "All checked routes and assets are live."
