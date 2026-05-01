@@ -22,8 +22,11 @@ const OPTIONS = [
   },
 ];
 
+const ESTIMATED_MENU_HEIGHT = 220;
+
 export function GetStartedDropdown() {
   const [open, setOpen] = useState(false);
+  const [openUp, setOpenUp] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -45,6 +48,16 @@ export function GetStartedDropdown() {
       document.removeEventListener("mousedown", onClick);
       document.removeEventListener("keydown", onKey);
     };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open || !containerRef.current) return;
+    const rect = containerRef.current.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const spaceAbove = rect.top;
+    setOpenUp(
+      spaceBelow < ESTIMATED_MENU_HEIGHT && spaceAbove > spaceBelow,
+    );
   }, [open]);
 
   return (
@@ -75,11 +88,13 @@ export function GetStartedDropdown() {
         {open && (
           <motion.div
             role="menu"
-            initial={{ opacity: 0, y: -8 }}
+            initial={{ opacity: 0, y: openUp ? 8 : -8 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
+            exit={{ opacity: 0, y: openUp ? 8 : -8 }}
             transition={{ duration: 0.15 }}
-            className="absolute left-0 top-full z-50 mt-2 w-[320px] overflow-hidden rounded-xl border border-border bg-elevated shadow-2xl"
+            className={`absolute left-0 z-50 w-[min(320px,calc(100vw-2rem))] overflow-hidden rounded-xl border border-border bg-elevated shadow-2xl ${
+              openUp ? "bottom-full mb-2" : "top-full mt-2"
+            }`}
           >
             <ul className="py-1">
               {OPTIONS.map((opt) => (

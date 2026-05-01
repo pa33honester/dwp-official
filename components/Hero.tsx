@@ -3,10 +3,10 @@ import { GetStartedDropdown } from "./GetStartedDropdown";
 
 export function Hero() {
   return (
-    <section className="relative overflow-hidden">
-      <div className="mx-auto grid max-w-7xl grid-cols-1 gap-12 px-6 py-20 md:grid-cols-2 md:py-28">
+    <section className="relative">
+      <div className="mx-auto grid max-w-7xl grid-cols-1 gap-10 px-4 py-14 sm:px-6 sm:py-20 md:grid-cols-2 md:py-28">
         <div className="flex flex-col justify-center">
-          <h1 className="font-display text-5xl font-semibold leading-tight tracking-tight text-white md:text-6xl">
+          <h1 className="font-display text-4xl font-semibold leading-tight tracking-tight text-white sm:text-5xl md:text-6xl">
             Unlock the
             <br />
             Future of
@@ -19,7 +19,7 @@ export function Hero() {
             Digital Wealth Partners: Your Gateway to Digital Investments.
             Experience Tailored Strategies for Family Offices, HNWIs, and RIAs.
           </p>
-          <div className="mt-8 flex items-center gap-4">
+          <div className="mt-8 flex flex-wrap items-center gap-3 sm:gap-4">
             <GetStartedDropdown />
             <Link href="/#services" className="btn-outline">
               View Services
@@ -27,7 +27,7 @@ export function Hero() {
           </div>
           <button
             aria-label="Scroll down"
-            className="mt-12 inline-flex h-9 w-9 items-center justify-center rounded-full border border-border text-zinc-400 transition hover:border-gold hover:text-gold"
+            className="mt-10 hidden h-9 w-9 items-center justify-center rounded-full border border-border text-zinc-400 transition hover:border-gold hover:text-gold sm:mt-12 sm:inline-flex"
           >
             <svg
               width="14"
@@ -44,11 +44,11 @@ export function Hero() {
           </button>
         </div>
         <div className="relative">
-          <div className="relative h-full min-h-[420px] overflow-hidden rounded-2xl border border-border bg-elevated">
+          <div className="relative h-full min-h-[260px] overflow-hidden rounded-2xl border border-border bg-elevated sm:min-h-[340px] md:min-h-[420px]">
             <div className="absolute inset-0 bg-gradient-to-br from-zinc-900 via-zinc-800/50 to-canvas" />
-            <div className="absolute inset-0 flex items-center justify-center">
-              <div className="flex items-center gap-3 text-3xl font-semibold tracking-tight text-white/90">
-                <span className="flex h-12 w-12 items-center justify-center rounded-md bg-gold-gradient text-canvas">
+            <div className="absolute inset-0 flex items-center justify-center px-4">
+              <div className="flex items-center gap-2 text-center text-xl font-semibold tracking-tight text-white/90 sm:gap-3 sm:text-2xl md:text-3xl">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-gold-gradient text-canvas sm:h-12 sm:w-12">
                   <svg
                     width="22"
                     height="22"
@@ -63,7 +63,9 @@ export function Hero() {
                     />
                   </svg>
                 </span>
-                Digital<span className="text-gold">Wealth</span>
+                <span>
+                  Digital Wealth <span className="text-gold">Partners</span>
+                </span>
               </div>
             </div>
           </div>

@@ -80,3 +80,39 @@ export const llcDetailsSchema = z.object({
 });
 
 export type LLCDetails = z.infer<typeof llcDetailsSchema>;
+
+export const CUSTODY_VALUE_BRACKETS = [
+  "Under $100,000",
+  "$100,000 – $500,000",
+  "$500,000 – $1M",
+  "$1M – $5M",
+  "$5M – $10M",
+  "$10M+",
+] as const;
+
+export const custodyInquirySchema = z
+  .object({
+    fullName: z.string().min(2, "Full name is required"),
+    email: z.string().email("Enter a valid email"),
+    phone: z.string().optional(),
+    estimatedAssetValue: z.enum(CUSTODY_VALUE_BRACKETS, {
+      errorMap: () => ({ message: "Estimated asset value is required" }),
+    }),
+    currentAllocation: z.string().optional(),
+    hasEntity: z.enum(["yes", "no"], {
+      errorMap: () => ({ message: "Please select an option" }),
+    }),
+    entityName: z.string().optional(),
+    agentContact: z.string().optional(),
+    assetsToTransfer: z.string().min(2, "Please list the assets you wish to transfer"),
+  })
+  .refine(
+    (d) => d.hasEntity !== "yes" || (d.entityName && d.entityName.length > 1),
+    { message: "Entity name is required", path: ["entityName"] },
+  )
+  .refine(
+    (d) => d.hasEntity !== "yes" || (d.agentContact && d.agentContact.length > 3),
+    { message: "Agent phone or email is required", path: ["agentContact"] },
+  );
+
+export type CustodyInquiry = z.infer<typeof custodyInquirySchema>;

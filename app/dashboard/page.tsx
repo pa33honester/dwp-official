@@ -36,7 +36,7 @@ export default function DashboardPage() {
 
   if (!ready) {
     return (
-      <main className="mx-auto max-w-7xl px-6 py-12">
+      <main className="mx-auto max-w-7xl px-4 py-10 sm:px-6 sm:py-12">
         <div className="h-8 w-48 animate-pulse rounded bg-elevated" />
         <div className="mt-4 h-12 w-64 animate-pulse rounded bg-elevated" />
         <div className="mt-10 h-40 animate-pulse rounded-2xl bg-elevated/50" />
@@ -47,7 +47,7 @@ export default function DashboardPage() {
   const connected = Boolean(wallet?.connected_address);
 
   return (
-    <main className="mx-auto max-w-7xl px-6 py-12">
+    <main className="mx-auto max-w-7xl px-4 py-10 sm:px-6 sm:py-12">
       <div className="flex flex-col gap-2">
         <p className="text-sm text-zinc-400">Welcome back</p>
         <div className="flex flex-wrap items-end justify-between gap-4">
@@ -55,11 +55,11 @@ export default function DashboardPage() {
             <p className="text-xs uppercase tracking-wider text-zinc-500">
               Portfolio Value
             </p>
-            <p className="font-display text-4xl font-semibold text-white md:text-5xl">
+            <p className="font-display text-3xl font-semibold text-white sm:text-4xl md:text-5xl">
               $0.00
             </p>
           </div>
-          <div className="rounded-md border border-border bg-elevated px-3 py-1.5 text-xs text-zinc-400">
+          <div className="rounded-md border border-border bg-elevated px-3 py-1.5 text-xs text-zinc-400 break-all">
             Wallet:{" "}
             <span className="text-gold">
               {connected
@@ -70,7 +70,7 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      <section className="mt-10 rounded-2xl border border-dashed border-border bg-surface/40 p-10 text-center">
+      <section className="mt-10 rounded-2xl border border-dashed border-border bg-surface/40 p-6 text-center sm:p-10">
         <h2 className="text-lg font-medium text-white">
           Deposit crypto to activate your wallet environment
         </h2>
