@@ -12,7 +12,7 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -46,9 +46,12 @@ jobs:
           protocol: ${{ vars.FTP_PROTOCOL || 'ftps' }}
           port: ${{ vars.FTP_PORT || 21 }}
           local-dir: ./out/
-          # Wipe server-dir before upload — guarantees old files are removed.
-          # cPanel's public_html should contain only the deployed site.
-          dangerous-clean-slate: true
+          # Delta sync via .ftp-deploy-sync-state.json — only uploads changed
+          # files and removes files that no longer exist in source. Resilient
+          # to mid-upload failures: subsequent runs resume incrementally
+          # rather than wiping and re-uploading the entire site.
+          state-name: .ftp-deploy-sync-state.json
+          log-level: standard
           exclude: |
             **/.git*
             **/.git*/**
