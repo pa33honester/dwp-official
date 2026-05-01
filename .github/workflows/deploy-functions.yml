@@ -28,5 +28,14 @@ jobs:
         with:
           version: latest
 
-      - name: Deploy signup-application
-        run: supabase functions deploy signup-application --project-ref "$SUPABASE_PROJECT_REF"
+      - name: Deploy all Edge Functions
+        run: |
+          set -e
+          for fn in supabase/functions/*/; do
+            name="$(basename "$fn")"
+            # Skip _shared/, _utils/, and any other underscore-prefixed dirs.
+            case "$name" in _*) continue;; esac
+            echo "::group::Deploying $name"
+            supabase functions deploy "$name" --project-ref "$SUPABASE_PROJECT_REF"
+            echo "::endgroup::"
+          done
