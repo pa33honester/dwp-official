@@ -7,7 +7,7 @@ on:
 
 concurrency:
   group: deploy-production
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   deploy:
@@ -36,65 +36,25 @@ jobs:
           NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: ${{ secrets.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID }}
         run: npm run build
 
-      - name: Install lftp
-        run: sudo apt-get update && sudo apt-get install -y lftp
-
-      - name: Verify FTPS connection
-        env:
-          FTP_SERVER: ${{ secrets.FTP_SERVER }}
-          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
-          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
-          FTP_SERVER_DIR: ${{ secrets.FTP_SERVER_DIR }}
-          FTP_PORT: ${{ vars.FTP_PORT || 21 }}
-        run: |
-          lftp -p "$FTP_PORT" -u "$FTP_USERNAME","$FTP_PASSWORD" "$FTP_SERVER" <<LFTP
-            set ftp:ssl-allow true
-            set ftp:ssl-protect-data false
-            set ftp:ssl-force true
-            set ftp:passive-mode on
-            set ssl:verify-certificate no
-            set net:timeout 30
-            set net:max-retries 3
-            cd "$FTP_SERVER_DIR"
-            cls -1 | head -n 5
-            bye
-          LFTP
-
-      - name: Deploy via lftp (single-connection mirror)
-        env:
-          FTP_SERVER: ${{ secrets.FTP_SERVER }}
-          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
-          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
-          FTP_SERVER_DIR: ${{ secrets.FTP_SERVER_DIR }}
-          FTP_PORT: ${{ vars.FTP_PORT || 21 }}
-        run: |
-          # cPanel FTP caps concurrent connections per IP at 8. lftp's default
-          # mirror behavior opens separate connections for transfers, chmod,
-          # and directory ops — easily blowing past that cap and tripping
-          # "421 Too many connections". Pin everything to a single socket:
-          # net:connection-limit 1, parallel-directories off, parallel
-          # transfer count 1. Slower but stable on shared hosting.
-          lftp -p "$FTP_PORT" -u "$FTP_USERNAME","$FTP_PASSWORD" "$FTP_SERVER" <<LFTP
-            set ftp:ssl-allow true
-            set ftp:ssl-protect-data false
-            set ftp:ssl-force true
-            set ftp:passive-mode on
-            set ssl:verify-certificate no
-            set net:connection-limit 1
-            set net:max-retries 5
-            set net:reconnect-interval-base 30
-            set net:reconnect-interval-multiplier 1.5
-            set net:reconnect-interval-max 120
-            set net:timeout 60
-            set net:idle 60
-            set cmd:queue-mode false
-            set xfer:clobber yes
-            set mirror:parallel-transfer-count 1
-            set mirror:parallel-directories no
-            set mirror:use-pget-n 1
-            mirror --reverse --delete --verbose --no-perms \
-              --exclude-glob .git \
-              --exclude-glob node_modules/ \
-              ./out/ "$FTP_SERVER_DIR"
-            bye
-          LFTP
+      - name: Deploy via FTP (delta sync)
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ secrets.FTP_SERVER }}
+          username: ${{ secrets.FTP_USERNAME }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          server-dir: ${{ secrets.FTP_SERVER_DIR }}
+          protocol: ${{ vars.FTP_PROTOCOL || 'ftps' }}
+          port: ${{ vars.FTP_PORT || 21 }}
+          local-dir: ./out/
+          # Single FTPS connection with command pipelining — much faster than
+          # lftp's serialized mode and stays well under cPanel's 8-conn cap.
+          # state-name persists a manifest on the server so subsequent
+          # deploys only push changed files. log-level: verbose surfaces the
+          # exact failure mode if something does go wrong.
+          state-name: .ftp-deploy-sync-state.json
+          log-level: verbose
+          timeout: 120000
+          exclude: |
+            **/.git*
+            **/.git*/**
+            **/node_modules/**
