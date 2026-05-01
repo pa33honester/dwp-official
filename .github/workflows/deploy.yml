@@ -48,9 +48,9 @@ jobs:
           protocol: ${{ vars.FTP_PROTOCOL || 'ftps' }}
           port: ${{ vars.FTP_PORT || 21 }}
           local-dir: ./out/
-          # state-name persists a manifest on the server; subsequent runs
-          # only re-upload files whose hashes changed. Single FTPS connection
-          # so we stay well under cPanel's 8-conn cap.
+          # Single FTPS connection with command pipelining. state-name
+          # persists a manifest on the server; subsequent runs only
+          # re-upload files whose hashes changed.
           state-name: .ftp-deploy-sync-state.json
           log-level: verbose
           timeout: 120000
@@ -59,28 +59,12 @@ jobs:
             **/.git*/**
             **/node_modules/**
 
-      - name: Retry FTP deploy (delta sync)
-        if: steps.deploy.outcome == 'failure'
-        id: deploy_retry
-        continue-on-error: true
-        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
-        with:
-          server: ${{ secrets.FTP_SERVER }}
-          username: ${{ secrets.FTP_USERNAME }}
-          password: ${{ secrets.FTP_PASSWORD }}
-          server-dir: ${{ secrets.FTP_SERVER_DIR }}
-          protocol: ${{ vars.FTP_PROTOCOL || 'ftps' }}
-          port: ${{ vars.FTP_PORT || 21 }}
-          local-dir: ./out/
-          state-name: .ftp-deploy-sync-state.json
-          log-level: verbose
-          timeout: 120000
-          exclude: |
-            **/.git*
-            **/.git*/**
-            **/node_modules/**
+      - name: Cool-down before targeted upload
+        # cPanel's FTPS rate-limiter trips after sustained activity. Give
+        # the server time to release connections before opening a new one.
+        run: sleep 60
 
-      - name: Force-upload subdirectory image assets via curl
+      - name: Targeted upload of team/ and blog/ images via lftp
         env:
           FTP_SERVER: ${{ secrets.FTP_SERVER }}
           FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
@@ -88,33 +72,38 @@ jobs:
           FTP_SERVER_DIR: ${{ secrets.FTP_SERVER_DIR }}
           FTP_PORT: ${{ vars.FTP_PORT || 21 }}
         run: |
-          # Belt-and-suspenders: FTP-Deploy-Action's state cache sometimes
-          # records subdirectory image uploads as "done" when they actually
-          # failed during a prior partial deploy, so subsequent runs skip
-          # them and the images stay 404. Direct curl upload of every
-          # image file in /team and /blog runs in seconds and is
-          # idempotent — re-uploads overwrite existing files cleanly.
-          set -e
-          base="${FTP_SERVER_DIR#./}"
-          base="${base%/}"
-          [ -n "$base" ] && base="$base/"
-
-          upload() {
-            local local_path="$1"
-            local remote_path="$2"
-            printf "  %s\n" "$remote_path"
-            curl --silent --show-error --fail --max-time 90 \
-              --ssl-reqd --insecure \
-              --user "$FTP_USERNAME:$FTP_PASSWORD" \
-              --ftp-create-dirs \
-              -T "$local_path" \
-              "ftp://${FTP_SERVER}:${FTP_PORT}/${base}${remote_path}"
-          }
-
-          cd out
-          for f in team/*.jpg blog/*.jpg; do
-            [ -f "$f" ] && upload "$f" "$f"
-          done
+          # FTP-Deploy-Action's state cache can wrongly record subdirectory
+          # images as "uploaded" when a prior partial deploy crashed during
+          # that phase, so /team/*.jpg and /blog/*.jpg stay 404 forever.
+          # lftp's mirror in a single connection reliably backfills them
+          # in ~30s. Generous retries handle the FTPS server's brittleness.
+          sudo apt-get install -y --no-install-recommends lftp
+          lftp -p "$FTP_PORT" -u "$FTP_USERNAME","$FTP_PASSWORD" "$FTP_SERVER" <<LFTP
+            set ftp:ssl-allow true
+            set ftp:ssl-protect-data false
+            set ftp:ssl-force true
+            set ftp:passive-mode on
+            set ssl:verify-certificate no
+            set net:connection-limit 1
+            set net:max-retries 8
+            set net:reconnect-interval-base 30
+            set net:reconnect-interval-multiplier 1.5
+            set net:reconnect-interval-max 180
+            set net:timeout 90
+            set net:idle 60
+            set cmd:fail-exit no
+            cd "$FTP_SERVER_DIR"
+            mkdir -p team
+            mkdir -p blog
+            set cmd:fail-exit yes
+            mirror --reverse --no-perms --verbose \
+              --include-glob '*.jpg' \
+              ./out/team/ team/
+            mirror --reverse --no-perms --verbose \
+              --include-glob '*.jpg' \
+              ./out/blog/ blog/
+            bye
+          LFTP
 
       - name: Verify deployment
         env:
