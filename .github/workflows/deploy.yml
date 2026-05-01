@@ -36,23 +36,32 @@ jobs:
           NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: ${{ secrets.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID }}
         run: npm run build
 
-      - name: Deploy via FTP
-        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
-        with:
-          server: ${{ secrets.FTP_SERVER }}
-          username: ${{ secrets.FTP_USERNAME }}
-          password: ${{ secrets.FTP_PASSWORD }}
-          server-dir: ${{ secrets.FTP_SERVER_DIR }}
-          protocol: ${{ vars.FTP_PROTOCOL || 'ftps' }}
-          port: ${{ vars.FTP_PORT || 21 }}
-          local-dir: ./out/
-          # Delta sync via .ftp-deploy-sync-state.json — only uploads changed
-          # files and removes files that no longer exist in source. Resilient
-          # to mid-upload failures: subsequent runs resume incrementally
-          # rather than wiping and re-uploading the entire site.
-          state-name: .ftp-deploy-sync-state.json
-          log-level: standard
-          exclude: |
-            **/.git*
-            **/.git*/**
-            **/node_modules/**
+      - name: Install lftp
+        run: sudo apt-get update && sudo apt-get install -y lftp
+
+      - name: Deploy via lftp (FTPS, parallel mirror with auto-reconnect)
+        env:
+          FTP_SERVER: ${{ secrets.FTP_SERVER }}
+          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
+          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+          FTP_SERVER_DIR: ${{ secrets.FTP_SERVER_DIR }}
+          FTP_PORT: ${{ vars.FTP_PORT || 21 }}
+        run: |
+          lftp -p "$FTP_PORT" -u "$FTP_USERNAME","$FTP_PASSWORD" "$FTP_SERVER" <<LFTP
+            set ftp:ssl-allow true
+            set ftp:ssl-protect-data true
+            set ftp:ssl-force true
+            set ssl:verify-certificate no
+            set net:max-retries 5
+            set net:reconnect-interval-base 10
+            set net:reconnect-interval-multiplier 1.5
+            set net:timeout 30
+            set net:idle 30
+            set mirror:parallel-transfer-count 4
+            set xfer:clobber yes
+            mirror --reverse --delete --verbose --parallel=4 \
+              --exclude-glob .git \
+              --exclude-glob node_modules/ \
+              ./out/ "$FTP_SERVER_DIR"
+            bye
+          LFTP
