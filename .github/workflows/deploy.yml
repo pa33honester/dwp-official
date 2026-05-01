@@ -60,7 +60,7 @@ jobs:
             bye
           LFTP
 
-      - name: Deploy via lftp (sequential, control-only TLS)
+      - name: Deploy via lftp (single-connection mirror)
         env:
           FTP_SERVER: ${{ secrets.FTP_SERVER }}
           FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
@@ -68,25 +68,31 @@ jobs:
           FTP_SERVER_DIR: ${{ secrets.FTP_SERVER_DIR }}
           FTP_PORT: ${{ vars.FTP_PORT || 21 }}
         run: |
-          # Sequential transfer (parallel=1) and control-only TLS — many cPanel
-          # FTPS servers throttle or break under parallel + encrypted data
-          # channel. --no-perms skips chmod attempts that often fail on shared
-          # hosting. --delete is intentionally omitted on this run; once the
-          # site is healthy we can re-enable cleanup in a follow-up.
+          # cPanel FTP caps concurrent connections per IP at 8. lftp's default
+          # mirror behavior opens separate connections for transfers, chmod,
+          # and directory ops — easily blowing past that cap and tripping
+          # "421 Too many connections". Pin everything to a single socket:
+          # net:connection-limit 1, parallel-directories off, parallel
+          # transfer count 1. Slower but stable on shared hosting.
           lftp -p "$FTP_PORT" -u "$FTP_USERNAME","$FTP_PASSWORD" "$FTP_SERVER" <<LFTP
             set ftp:ssl-allow true
             set ftp:ssl-protect-data false
             set ftp:ssl-force true
             set ftp:passive-mode on
             set ssl:verify-certificate no
-            set net:max-retries 10
-            set net:reconnect-interval-base 15
+            set net:connection-limit 1
+            set net:max-retries 5
+            set net:reconnect-interval-base 30
             set net:reconnect-interval-multiplier 1.5
+            set net:reconnect-interval-max 120
             set net:timeout 60
             set net:idle 60
+            set cmd:queue-mode false
             set xfer:clobber yes
             set mirror:parallel-transfer-count 1
-            mirror --reverse --verbose --no-perms --continue \
+            set mirror:parallel-directories no
+            set mirror:use-pget-n 1
+            mirror --reverse --delete --verbose --no-perms \
               --exclude-glob .git \
               --exclude-glob node_modules/ \
               ./out/ "$FTP_SERVER_DIR"
