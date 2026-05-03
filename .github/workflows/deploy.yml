@@ -45,14 +45,7 @@ jobs:
           ---
           deployment:
             tasks:
-              - export DEPLOYPATH=/home/dwpoffic/public_html/
-              - /usr/bin/rsync -av --delete \
-                  --exclude='.git/' \
-                  --exclude='.cpanel.yml' \
-                  --exclude='cgi-bin/' \
-                  --exclude='.well-known/' \
-                  --exclude='.htaccess' \
-                  ./ "$DEPLOYPATH"
+              - /usr/bin/rsync -av --delete --exclude='.git/' --exclude='.cpanel.yml' --exclude='cgi-bin/' --exclude='.well-known/' --exclude='.htaccess' ./ /home/dwpoffic/public_html/
           EOF
 
       - name: Push to deploy branch
