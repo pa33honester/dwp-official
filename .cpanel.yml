@@ -1,4 +1,6 @@
 ---
 deployment:
   tasks:
-    - /usr/bin/rsync -av --delete --exclude='.git/' --exclude='.cpanel.yml' --exclude='cgi-bin/' --exclude='.well-known/' --exclude='.htaccess' ./ /home/dwpoffic/public_html/
+    - "/usr/bin/find /home/dwpoffic/public_html -mindepth 1 -maxdepth 1 ! -name cgi-bin ! -name .well-known ! -name .htaccess -exec /bin/rm -rf {} +"
+    - "/bin/cp -R /home/dwpoffic/repositories/dwp-official/. /home/dwpoffic/public_html/"
+    - "/bin/rm -rf /home/dwpoffic/public_html/.git /home/dwpoffic/public_html/.cpanel.yml"
