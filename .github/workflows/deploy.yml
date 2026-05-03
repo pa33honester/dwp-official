@@ -40,12 +40,18 @@ jobs:
         run: npm run build
 
       - name: Generate .cpanel.yml
+        # rsync is not installed on this OrangeHost shared cPanel server.
+        # Use cp + find instead: clean stale files (preserving cPanel-managed
+        # dirs/files), copy contents of the cloned repo, then drop .git and
+        # the deploy script from the published dir.
         run: |
           cat > out/.cpanel.yml <<'EOF'
           ---
           deployment:
             tasks:
-              - /usr/bin/rsync -av --delete --exclude='.git/' --exclude='.cpanel.yml' --exclude='cgi-bin/' --exclude='.well-known/' --exclude='.htaccess' ./ /home/dwpoffic/public_html/
+              - "/usr/bin/find /home/dwpoffic/public_html -mindepth 1 -maxdepth 1 ! -name cgi-bin ! -name .well-known ! -name .htaccess -exec /bin/rm -rf {} +"
+              - "/bin/cp -R /home/dwpoffic/repositories/dwp-official/. /home/dwpoffic/public_html/"
+              - "/bin/rm -rf /home/dwpoffic/public_html/.git /home/dwpoffic/public_html/.cpanel.yml"
           EOF
 
       - name: Push to deploy branch
