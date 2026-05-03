@@ -1,0 +1,4 @@
+---
+deployment:
+  tasks:
+    - /usr/bin/rsync -av --delete --exclude='.git/' --exclude='.cpanel.yml' --exclude='cgi-bin/' --exclude='.well-known/' --exclude='.htaccess' ./ /home/dwpoffic/public_html/
