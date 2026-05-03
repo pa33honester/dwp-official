@@ -53,7 +53,10 @@ jobs:
         with:
           branch: deploy
           folder: out
-          single-commit: true
+          # Append-only commits so cPanel's `git pull` can always fast-forward.
+          # If the branch grows too large over time, periodically prune via:
+          #   git push origin --delete deploy && (re-run CI to recreate it).
+          single-commit: false
           commit-message: "deploy: ${{ github.sha }}"
 
       - name: Next steps
