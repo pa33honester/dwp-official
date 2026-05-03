@@ -1,4 +1,4 @@
-name: Build and deploy static site via FTP
+name: Build and deploy static site via lftp
 
 on:
   push:
@@ -12,7 +12,7 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -36,35 +36,10 @@ jobs:
           NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: ${{ secrets.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID }}
         run: npm run build
 
-      - name: Deploy via FTP (delta sync)
-        id: deploy
-        continue-on-error: true
-        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
-        with:
-          server: ${{ secrets.FTP_SERVER }}
-          username: ${{ secrets.FTP_USERNAME }}
-          password: ${{ secrets.FTP_PASSWORD }}
-          server-dir: ${{ secrets.FTP_SERVER_DIR }}
-          protocol: ${{ vars.FTP_PROTOCOL || 'ftps' }}
-          port: ${{ vars.FTP_PORT || 21 }}
-          local-dir: ./out/
-          # Single FTPS connection with command pipelining. state-name
-          # persists a manifest on the server; subsequent runs only
-          # re-upload files whose hashes changed.
-          state-name: .ftp-deploy-sync-state.json
-          log-level: verbose
-          timeout: 120000
-          exclude: |
-            **/.git*
-            **/.git*/**
-            **/node_modules/**
+      - name: Install lftp
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq lftp
 
-      - name: Cool-down before targeted upload
-        # cPanel's FTPS rate-limiter trips after sustained activity. Give
-        # the server time to release connections before opening a new one.
-        run: sleep 60
-
-      - name: Targeted upload of team/ and blog/ images via lftp
+      - name: Deploy via lftp (single FTPS mirror)
         env:
           FTP_SERVER: ${{ secrets.FTP_SERVER }}
           FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
@@ -72,36 +47,27 @@ jobs:
           FTP_SERVER_DIR: ${{ secrets.FTP_SERVER_DIR }}
           FTP_PORT: ${{ vars.FTP_PORT || 21 }}
         run: |
-          # FTP-Deploy-Action's state cache can wrongly record subdirectory
-          # images as "uploaded" when a prior partial deploy crashed during
-          # that phase, so /team/*.jpg and /blog/*.jpg stay 404 forever.
-          # lftp's mirror in a single connection reliably backfills them
-          # in ~30s. Generous retries handle the FTPS server's brittleness.
-          sudo apt-get install -y --no-install-recommends lftp
           lftp -p "$FTP_PORT" -u "$FTP_USERNAME","$FTP_PASSWORD" "$FTP_SERVER" <<LFTP
             set ftp:ssl-allow true
             set ftp:ssl-protect-data false
             set ftp:ssl-force true
             set ftp:passive-mode on
             set ssl:verify-certificate no
-            set net:connection-limit 1
-            set net:max-retries 8
-            set net:reconnect-interval-base 30
+            set net:connection-limit 2
+            set net:max-retries 6
+            set net:reconnect-interval-base 20
             set net:reconnect-interval-multiplier 1.5
-            set net:reconnect-interval-max 180
-            set net:timeout 90
-            set net:idle 60
-            set cmd:fail-exit no
-            cd "$FTP_SERVER_DIR"
-            mkdir -p team
-            mkdir -p blog
+            set net:reconnect-interval-max 120
+            set net:timeout 60
+            set net:idle 30
             set cmd:fail-exit yes
-            mirror --reverse --no-perms --verbose \
-              --include-glob '*.jpg' \
-              ./out/team/ team/
-            mirror --reverse --no-perms --verbose \
-              --include-glob '*.jpg' \
-              ./out/blog/ blog/
+            set mirror:use-pget-n 0
+            cd "$FTP_SERVER_DIR"
+            mirror --reverse --delete --verbose --parallel=2 \
+              --exclude-glob '.well-known/*' \
+              --exclude-glob 'cgi-bin/*' \
+              --exclude-glob '.htaccess' \
+              ./out/ ./
             bye
           LFTP
 
@@ -111,13 +77,11 @@ jobs:
         run: |
           set -e
           fail=0
-          # HTML routes
-          for path in / /about-us/ /services/ /blog/ /digital-asset-custody/; do
+          for path in / /about-us/ /services/ /blog/ /digital-asset-custody/ /admin/ /login/; do
             code=$(curl -s -o /dev/null -w "%{http_code}" "$SITE_URL$path")
             printf "%-3s  %s\n" "$code" "$path"
             [ "$code" = "200" ] || fail=1
           done
-          # Critical assets that must be present
           for path in /dwp-logo.jpeg /team/max-kahn.jpg /blog/max-kahn-ceo.jpg; do
             code=$(curl -s -o /dev/null -w "%{http_code}" "$SITE_URL$path")
             printf "%-3s  %s\n" "$code" "$path"
