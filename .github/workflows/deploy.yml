@@ -1,4 +1,4 @@
-name: Build and deploy static site via lftp
+name: Build and publish to deploy branch
 
 on:
   push:
@@ -9,10 +9,13 @@ concurrency:
   group: deploy-production
   cancel-in-progress: true
 
+permissions:
+  contents: write
+
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -36,59 +39,31 @@ jobs:
           NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: ${{ secrets.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID }}
         run: npm run build
 
-      - name: Install lftp
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq lftp
-
-      - name: Deploy via lftp (single FTPS mirror)
-        env:
-          FTP_SERVER: ${{ secrets.FTP_SERVER }}
-          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
-          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
-          FTP_SERVER_DIR: ${{ secrets.FTP_SERVER_DIR }}
-          FTP_PORT: ${{ vars.FTP_PORT || 21 }}
+      - name: Generate .cpanel.yml
         run: |
-          lftp -p "$FTP_PORT" -u "$FTP_USERNAME","$FTP_PASSWORD" "$FTP_SERVER" <<LFTP
-            set ftp:ssl-allow true
-            set ftp:ssl-protect-data false
-            set ftp:ssl-force true
-            set ftp:passive-mode on
-            set ssl:verify-certificate no
-            set net:connection-limit 2
-            set net:max-retries 6
-            set net:reconnect-interval-base 20
-            set net:reconnect-interval-multiplier 1.5
-            set net:reconnect-interval-max 120
-            set net:timeout 60
-            set net:idle 30
-            set cmd:fail-exit yes
-            set mirror:use-pget-n 0
-            cd "$FTP_SERVER_DIR"
-            mirror --reverse --delete --verbose --parallel=2 \
-              --exclude-glob '.well-known/*' \
-              --exclude-glob 'cgi-bin/*' \
-              --exclude-glob '.htaccess' \
-              ./out/ ./
-            bye
-          LFTP
+          cat > out/.cpanel.yml <<'EOF'
+          ---
+          deployment:
+            tasks:
+              - export DEPLOYPATH=/home/dwpoffic/public_html/
+              - /usr/bin/rsync -av --delete \
+                  --exclude='.git/' \
+                  --exclude='.cpanel.yml' \
+                  --exclude='cgi-bin/' \
+                  --exclude='.well-known/' \
+                  --exclude='.htaccess' \
+                  ./ "$DEPLOYPATH"
+          EOF
 
-      - name: Verify deployment
-        env:
-          SITE_URL: ${{ vars.SITE_URL || 'https://dwpofficial.org' }}
+      - name: Push to deploy branch
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          branch: deploy
+          folder: out
+          single-commit: true
+          commit-message: "deploy: ${{ github.sha }}"
+
+      - name: Next steps
         run: |
-          set -e
-          fail=0
-          for path in / /about-us/ /services/ /blog/ /digital-asset-custody/ /admin/ /login/; do
-            code=$(curl -s -o /dev/null -w "%{http_code}" "$SITE_URL$path")
-            printf "%-3s  %s\n" "$code" "$path"
-            [ "$code" = "200" ] || fail=1
-          done
-          for path in /dwp-logo.jpeg /team/max-kahn.jpg /blog/max-kahn-ceo.jpg; do
-            code=$(curl -s -o /dev/null -w "%{http_code}" "$SITE_URL$path")
-            printf "%-3s  %s\n" "$code" "$path"
-            [ "$code" = "200" ] || fail=1
-          done
-          if [ "$fail" != "0" ]; then
-            echo "::error::Deployment incomplete — one or more routes/assets are missing"
-            exit 1
-          fi
-          echo "All checked routes and assets are live."
+          echo "::notice::Build pushed to 'deploy' branch (single-commit, force-pushed)."
+          echo "::notice::In cPanel → Git Version Control → click 'Update from Remote' then 'Deploy HEAD Commit' to publish to public_html."
