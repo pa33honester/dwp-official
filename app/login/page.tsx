@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Input } from "@/components/forms/Field";
@@ -19,12 +18,13 @@ export default function LoginPage() {
     setError(null);
     try {
       const supabase = createSupabaseBrowserClient();
-      const { error: signInError } = await supabase.auth.signInWithPassword({
+      const { data, error: signInError } = await supabase.auth.signInWithPassword({
         email,
         password,
       });
       if (signInError) throw signInError;
-      router.push("/dashboard");
+      const role = (data.user?.app_metadata as Record<string, unknown> | null)?.role;
+      router.push(role === "admin" ? "/admin" : "/dashboard");
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Sign in failed. Try again.";
@@ -70,10 +70,7 @@ export default function LoginPage() {
           </button>
         </form>
         <p className="mt-6 text-center text-sm text-zinc-400">
-          Don&apos;t have an account?{" "}
-          <Link href="/" className="text-gold hover:underline">
-            Get started
-          </Link>
+          Need an account? Contact your DWP administrator.
         </p>
       </div>
     </main>

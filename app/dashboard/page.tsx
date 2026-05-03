@@ -8,6 +8,7 @@ import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 type WalletApplication = {
   vault_name: string | null;
   connected_address: string | null;
+  balance_usd: number | string | null;
 };
 
 export default function DashboardPage() {
@@ -24,7 +25,7 @@ export default function DashboardPage() {
       }
       const { data: row } = await supabase
         .from("wallet_applications")
-        .select("vault_name, connected_address")
+        .select("vault_name, connected_address, balance_usd")
         .eq("user_id", data.session.user.id)
         .order("created_at", { ascending: false })
         .limit(1)
@@ -56,7 +57,10 @@ export default function DashboardPage() {
               Portfolio Value
             </p>
             <p className="font-display text-3xl font-semibold text-white sm:text-4xl md:text-5xl">
-              $0.00
+              {new Intl.NumberFormat("en-US", {
+                style: "currency",
+                currency: "USD",
+              }).format(Number(wallet?.balance_usd ?? 0))}
             </p>
           </div>
           <div className="rounded-md border border-border bg-elevated px-3 py-1.5 text-xs text-zinc-400 break-all">

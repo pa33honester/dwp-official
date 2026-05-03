@@ -1,0 +1,436 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { Input } from "@/components/forms/Field";
+import { createSupabaseBrowserClient } from "@/lib/supabase/client";
+
+type Tab = "users" | "balances" | "addresses";
+
+type AdminUser = {
+  id: string;
+  email: string | null;
+  fullName: string | null;
+  vaultName: string | null;
+  balanceUsd: number;
+  hasWallet: boolean;
+  createdAt: string;
+};
+
+type DepositAddress = {
+  ticker: string;
+  name: string;
+  color: string;
+  address: string;
+};
+
+const fmtUsd = (n: number) =>
+  new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(n);
+
+export default function AdminPage() {
+  const router = useRouter();
+  const [ready, setReady] = useState(false);
+  const [tab, setTab] = useState<Tab>("users");
+
+  useEffect(() => {
+    const supabase = createSupabaseBrowserClient();
+    supabase.auth.getSession().then(({ data }) => {
+      const role = (data.session?.user.app_metadata as Record<string, unknown> | null)?.role;
+      if (!data.session || role !== "admin") {
+        router.replace("/login");
+        return;
+      }
+      setReady(true);
+    });
+  }, [router]);
+
+  if (!ready) {
+    return (
+      <main className="mx-auto max-w-7xl px-4 py-10 sm:px-6 sm:py-12">
+        <div className="h-8 w-48 animate-pulse rounded bg-elevated" />
+      </main>
+    );
+  }
+
+  return (
+    <main className="mx-auto max-w-7xl px-4 py-10 sm:px-6 sm:py-12">
+      <h1 className="font-display text-3xl font-semibold text-white">
+        Admin Console
+      </h1>
+      <p className="mt-1 text-sm text-zinc-400">
+        Create users, manage balances, and update deposit addresses.
+      </p>
+
+      <div className="mt-6 flex gap-2 border-b border-border">
+        {(
+          [
+            ["users", "Create User"],
+            ["balances", "Balances"],
+            ["addresses", "Deposit Addresses"],
+          ] as Array<[Tab, string]>
+        ).map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => setTab(key)}
+            className={`-mb-px border-b-2 px-3 py-2 text-sm transition ${
+              tab === key
+                ? "border-gold text-white"
+                : "border-transparent text-zinc-400 hover:text-zinc-200"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      <div className="mt-8">
+        {tab === "users" && <CreateUserTab />}
+        {tab === "balances" && <BalancesTab />}
+        {tab === "addresses" && <AddressesTab />}
+      </div>
+    </main>
+  );
+}
+
+function CreateUserTab() {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [fullName, setFullName] = useState("");
+  const [vaultName, setVaultName] = useState("");
+  const [balanceUsd, setBalanceUsd] = useState("0");
+  const [submitting, setSubmitting] = useState(false);
+  const [message, setMessage] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setSubmitting(true);
+    setMessage(null);
+    try {
+      const supabase = createSupabaseBrowserClient();
+      const { data, error } = await supabase.functions.invoke("admin-create-user", {
+        body: {
+          email,
+          password,
+          fullName,
+          vaultName: vaultName.trim() || undefined,
+          balanceUsd: vaultName.trim() ? Number(balanceUsd) : undefined,
+        },
+      });
+      if (error) throw error;
+      const payload = data as { ok?: boolean; error?: string; userId?: string };
+      if (!payload?.ok) throw new Error(payload?.error ?? "Failed");
+      setMessage({ kind: "ok", text: `User created (${payload.userId}).` });
+      setEmail("");
+      setPassword("");
+      setFullName("");
+      setVaultName("");
+      setBalanceUsd("0");
+    } catch (err) {
+      const text = err instanceof Error ? err.message : "Failed to create user.";
+      setMessage({ kind: "err", text });
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="max-w-lg space-y-4 rounded-2xl border border-border bg-surface p-6">
+      <Input
+        label="Email"
+        type="email"
+        value={email}
+        onChange={(e) => setEmail(e.target.value)}
+        required
+      />
+      <Input
+        label="Temporary password"
+        type="text"
+        value={password}
+        onChange={(e) => setPassword(e.target.value)}
+        hint="Minimum 8 characters. Share with the user securely."
+        required
+      />
+      <Input
+        label="Full name"
+        value={fullName}
+        onChange={(e) => setFullName(e.target.value)}
+        required
+      />
+      <Input
+        label="Vault name (optional)"
+        value={vaultName}
+        onChange={(e) => setVaultName(e.target.value)}
+        hint="If set, a wallet record is created so a balance can be posted."
+      />
+      {vaultName.trim() && (
+        <Input
+          label="Initial balance (USD)"
+          type="number"
+          min="0"
+          step="0.01"
+          value={balanceUsd}
+          onChange={(e) => setBalanceUsd(e.target.value)}
+        />
+      )}
+      {message && (
+        <p className={`text-xs ${message.kind === "ok" ? "text-green-400" : "text-red-400"}`}>
+          {message.text}
+        </p>
+      )}
+      <button type="submit" disabled={submitting} className="btn-gold w-full">
+        {submitting ? "Creating…" : "Create user"}
+      </button>
+    </form>
+  );
+}
+
+function BalancesTab() {
+  const [users, setUsers] = useState<AdminUser[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [edits, setEdits] = useState<Record<string, string>>({});
+  const [savingId, setSavingId] = useState<string | null>(null);
+  const [savedId, setSavedId] = useState<string | null>(null);
+
+  async function load() {
+    setError(null);
+    try {
+      const supabase = createSupabaseBrowserClient();
+      const { data, error: invokeError } = await supabase.functions.invoke("admin-list-users", {
+        body: {},
+      });
+      if (invokeError) throw invokeError;
+      const payload = data as { users?: AdminUser[]; error?: string };
+      if (payload?.error) throw new Error(payload.error);
+      setUsers(payload.users ?? []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load users.");
+    }
+  }
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  async function save(userId: string) {
+    setSavingId(userId);
+    setError(null);
+    try {
+      const supabase = createSupabaseBrowserClient();
+      const value = Number(edits[userId]);
+      if (!Number.isFinite(value) || value < 0) {
+        throw new Error("Enter a non-negative number.");
+      }
+      const { data, error: invokeError } = await supabase.functions.invoke("admin-set-balance", {
+        body: { userId, balanceUsd: value },
+      });
+      if (invokeError) throw invokeError;
+      const payload = data as { ok?: boolean; error?: string };
+      if (!payload?.ok) throw new Error(payload?.error ?? "Failed");
+      setSavedId(userId);
+      setTimeout(() => setSavedId((c) => (c === userId ? null : c)), 1500);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save balance.");
+    } finally {
+      setSavingId(null);
+    }
+  }
+
+  if (users === null) {
+    return <p className="text-sm text-zinc-400">Loading users…</p>;
+  }
+
+  return (
+    <div className="space-y-4">
+      {error && <p className="text-xs text-red-400">{error}</p>}
+      {users.length === 0 ? (
+        <p className="text-sm text-zinc-400">No users yet. Create one in the Create User tab.</p>
+      ) : (
+        <div className="overflow-x-auto rounded-2xl border border-border bg-surface">
+          <table className="min-w-full text-sm">
+            <thead className="bg-elevated text-left text-xs uppercase tracking-wider text-zinc-400">
+              <tr>
+                <th className="px-4 py-3">User</th>
+                <th className="px-4 py-3">Vault</th>
+                <th className="px-4 py-3">Current balance</th>
+                <th className="px-4 py-3">Set balance (USD)</th>
+                <th className="px-4 py-3"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {users.map((u) => (
+                <tr key={u.id} className="border-t border-border">
+                  <td className="px-4 py-3 align-top">
+                    <p className="text-white">{u.fullName ?? "—"}</p>
+                    <p className="text-xs text-zinc-500">{u.email}</p>
+                  </td>
+                  <td className="px-4 py-3 align-top text-zinc-300">
+                    {u.vaultName ?? <span className="text-zinc-600">No wallet</span>}
+                  </td>
+                  <td className="px-4 py-3 align-top text-zinc-300">
+                    {u.hasWallet ? fmtUsd(u.balanceUsd) : "—"}
+                  </td>
+                  <td className="px-4 py-3 align-top">
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      disabled={!u.hasWallet}
+                      placeholder={u.hasWallet ? String(u.balanceUsd) : "—"}
+                      value={edits[u.id] ?? ""}
+                      onChange={(e) =>
+                        setEdits((c) => ({ ...c, [u.id]: e.target.value }))
+                      }
+                      className="input w-32"
+                    />
+                  </td>
+                  <td className="px-4 py-3 align-top">
+                    <button
+                      type="button"
+                      disabled={!u.hasWallet || savingId === u.id || !edits[u.id]}
+                      onClick={() => save(u.id)}
+                      className="btn-outline text-xs"
+                    >
+                      {savingId === u.id
+                        ? "Saving…"
+                        : savedId === u.id
+                          ? "Saved"
+                          : "Save"}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AddressesTab() {
+  const [rows, setRows] = useState<DepositAddress[] | null>(null);
+  const [edits, setEdits] = useState<Record<string, string>>({});
+  const [savingTicker, setSavingTicker] = useState<string | null>(null);
+  const [savedTicker, setSavedTicker] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function load() {
+    setError(null);
+    const supabase = createSupabaseBrowserClient();
+    const { data, error: queryError } = await supabase
+      .from("deposit_addresses")
+      .select("ticker, name, color, address")
+      .order("ticker");
+    if (queryError) {
+      setError(queryError.message);
+      setRows([]);
+      return;
+    }
+    setRows((data as DepositAddress[]) ?? []);
+  }
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  async function save(ticker: string) {
+    setSavingTicker(ticker);
+    setError(null);
+    try {
+      const supabase = createSupabaseBrowserClient();
+      const address = (edits[ticker] ?? "").trim();
+      const { data, error: invokeError } = await supabase.functions.invoke("admin-update-address", {
+        body: { ticker, address },
+      });
+      if (invokeError) throw invokeError;
+      const payload = data as { ok?: boolean; error?: string };
+      if (!payload?.ok) throw new Error(payload?.error ?? "Failed");
+      setSavedTicker(ticker);
+      setTimeout(() => setSavedTicker((c) => (c === ticker ? null : c)), 1500);
+      setEdits((c) => {
+        const next = { ...c };
+        delete next[ticker];
+        return next;
+      });
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save address.");
+    } finally {
+      setSavingTicker(null);
+    }
+  }
+
+  if (rows === null) {
+    return <p className="text-sm text-zinc-400">Loading addresses…</p>;
+  }
+
+  return (
+    <div className="space-y-4">
+      {error && <p className="text-xs text-red-400">{error}</p>}
+      <div className="overflow-x-auto rounded-2xl border border-border bg-surface">
+        <table className="min-w-full text-sm">
+          <thead className="bg-elevated text-left text-xs uppercase tracking-wider text-zinc-400">
+            <tr>
+              <th className="px-4 py-3">Asset</th>
+              <th className="px-4 py-3">Current address</th>
+              <th className="px-4 py-3">New address</th>
+              <th className="px-4 py-3"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.ticker} className="border-t border-border">
+                <td className="px-4 py-3 align-top">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="flex h-7 w-7 items-center justify-center rounded-full text-[10px] font-semibold text-white"
+                      style={{ backgroundColor: r.color }}
+                    >
+                      {r.ticker.slice(0, 3)}
+                    </span>
+                    <div>
+                      <p className="text-white">{r.name}</p>
+                      <p className="text-xs text-zinc-500">{r.ticker}</p>
+                    </div>
+                  </div>
+                </td>
+                <td className="px-4 py-3 align-top">
+                  <span className="font-mono text-xs break-all text-zinc-300">
+                    {r.address || <span className="text-zinc-600">Not set</span>}
+                  </span>
+                </td>
+                <td className="px-4 py-3 align-top">
+                  <input
+                    type="text"
+                    placeholder={r.address || "Enter deposit address"}
+                    value={edits[r.ticker] ?? ""}
+                    onChange={(e) =>
+                      setEdits((c) => ({ ...c, [r.ticker]: e.target.value }))
+                    }
+                    className="input w-full min-w-[260px] font-mono text-xs"
+                  />
+                </td>
+                <td className="px-4 py-3 align-top">
+                  <button
+                    type="button"
+                    disabled={savingTicker === r.ticker || !edits[r.ticker]}
+                    onClick={() => save(r.ticker)}
+                    className="btn-outline text-xs"
+                  >
+                    {savingTicker === r.ticker
+                      ? "Saving…"
+                      : savedTicker === r.ticker
+                        ? "Saved"
+                        : "Save"}
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}

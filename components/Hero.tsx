@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { GetStartedDropdown } from "./GetStartedDropdown";
 
 export function Hero() {
   return (
@@ -20,7 +19,9 @@ export function Hero() {
             Experience Tailored Strategies for Family Offices, HNWIs, and RIAs.
           </p>
           <div className="mt-8 flex flex-wrap items-center gap-3 sm:gap-4">
-            <GetStartedDropdown />
+            <Link href="/login" className="btn-gold text-base">
+              Login
+            </Link>
             <Link href="/#services" className="btn-outline">
               View Services
             </Link>

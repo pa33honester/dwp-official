@@ -8,3 +8,5 @@ out
 *.log
 .vercel
 tsconfig.tsbuildinfo
+supabase/.temp
+supabase/.branches

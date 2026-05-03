@@ -89,8 +89,8 @@ export function Header() {
               </button>
             </>
           ) : (
-            <Link href="/signup/wallet" className="btn-gold hidden sm:inline-flex">
-              Sign Up
+            <Link href="/login" className="btn-gold hidden sm:inline-flex">
+              Login
             </Link>
           )}
           <button
@@ -150,11 +150,11 @@ export function Header() {
               </>
             ) : (
               <Link
-                href="/signup/wallet"
+                href="/login"
                 onClick={() => setOpen(false)}
                 className="btn-gold mt-3 sm:hidden"
               >
-                Sign Up
+                Login
               </Link>
             )}
           </nav>
