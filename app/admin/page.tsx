@@ -14,6 +14,8 @@ type AdminUser = {
   fullName: string | null;
   vaultName: string | null;
   balanceUsd: number;
+  lockedBalanceUsd: number;
+  returnEarningsUsd: number;
   hasWallet: boolean;
   role: "admin" | "user" | null;
   createdAt: string;
@@ -381,6 +383,80 @@ function UsersTab() {
   );
 }
 
+function PercentField({
+  label,
+  raw,
+  onRawChange,
+  mode,
+  onModeChange,
+  resolved,
+  total,
+  allowNegative = false,
+}: {
+  label: string;
+  raw: string;
+  onRawChange: (v: string) => void;
+  mode: "$" | "%";
+  onModeChange: (m: "$" | "%") => void;
+  resolved: number | null;
+  total: number;
+  allowNegative?: boolean;
+}) {
+  return (
+    <div>
+      <label className="block text-xs uppercase tracking-wider text-zinc-400">
+        {label}
+        <div className="mt-1 flex items-stretch gap-2">
+          <input
+            type="number"
+            step="0.01"
+            min={allowNegative ? undefined : "0"}
+            value={raw}
+            onChange={(e) => onRawChange(e.target.value)}
+            className="input flex-1"
+          />
+          <div className="inline-flex overflow-hidden rounded-md border border-border">
+            {(["$", "%"] as const).map((m) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => onModeChange(m)}
+                className={`px-3 text-xs ${
+                  mode === m ? "bg-gold text-zinc-900" : "bg-elevated text-zinc-400"
+                }`}
+              >
+                {m}
+              </button>
+            ))}
+          </div>
+        </div>
+      </label>
+      {mode === "%" && resolved !== null && (
+        <p className="mt-1 text-[10px] text-zinc-500">
+          ≈ {new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(resolved)}{" "}
+          (of {new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(total)} total)
+        </p>
+      )}
+    </div>
+  );
+}
+
+function resolveValue(
+  raw: string,
+  mode: "$" | "%",
+  total: number,
+): number | null {
+  const trimmed = raw.trim();
+  if (trimmed === "" || trimmed === "-") return null;
+  const n = Number(trimmed);
+  if (!Number.isFinite(n)) return null;
+  return mode === "%" ? (total * n) / 100 : n;
+}
+
+function roundCents(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
 function EditUserDialog({
   user,
   isSelf,
@@ -397,8 +473,16 @@ function EditUserDialog({
   const [password, setPassword] = useState("");
   const [role, setRole] = useState<"admin" | "user">(user.role === "admin" ? "admin" : "user");
   const [vaultName, setVaultName] = useState(user.vaultName ?? "");
+  const [lockedRaw, setLockedRaw] = useState(String(user.lockedBalanceUsd ?? 0));
+  const [lockedMode, setLockedMode] = useState<"$" | "%">("$");
+  const [returnRaw, setReturnRaw] = useState(String(user.returnEarningsUsd ?? 0));
+  const [returnMode, setReturnMode] = useState<"$" | "%">("$");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const total = Number(user.balanceUsd ?? 0);
+  const lockedResolved = resolveValue(lockedRaw, lockedMode, total);
+  const returnResolved = resolveValue(returnRaw, returnMode, total);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -412,6 +496,8 @@ function EditUserDialog({
         password?: string;
         role?: "admin" | "user";
         vaultName?: string;
+        lockedBalanceUsd?: number;
+        returnEarningsUsd?: number;
       };
       const body: Body = { userId: user.id };
       if (fullName.trim() && fullName.trim() !== (user.fullName ?? "")) {
@@ -424,6 +510,13 @@ function EditUserDialog({
       if (role !== (user.role === "admin" ? "admin" : "user")) body.role = role;
       if (vaultName.trim() && vaultName.trim() !== (user.vaultName ?? "")) {
         body.vaultName = vaultName.trim();
+      }
+      if (lockedResolved !== null && lockedResolved !== Number(user.lockedBalanceUsd ?? 0)) {
+        if (lockedResolved < 0) throw new Error("Locked balance must be non-negative.");
+        body.lockedBalanceUsd = roundCents(lockedResolved);
+      }
+      if (returnResolved !== null && returnResolved !== Number(user.returnEarningsUsd ?? 0)) {
+        body.returnEarningsUsd = roundCents(returnResolved);
       }
 
       const supabase = createSupabaseBrowserClient();
@@ -493,6 +586,25 @@ function EditUserDialog({
           label="Vault name"
           value={vaultName}
           onChange={(e) => setVaultName(e.target.value)}
+        />
+        <PercentField
+          label="Locked / Staked balance"
+          raw={lockedRaw}
+          onRawChange={setLockedRaw}
+          mode={lockedMode}
+          onModeChange={setLockedMode}
+          resolved={lockedResolved}
+          total={total}
+        />
+        <PercentField
+          label="Return earnings"
+          raw={returnRaw}
+          onRawChange={setReturnRaw}
+          mode={returnMode}
+          onModeChange={setReturnMode}
+          resolved={returnResolved}
+          total={total}
+          allowNegative
         />
         {error && <p className="text-xs text-red-400">{error}</p>}
         <div className="flex justify-end gap-2 pt-2">

@@ -12,6 +12,8 @@ type Body = {
   password?: string;
   role?: "admin" | "user";
   vaultName?: string;
+  lockedBalanceUsd?: number;
+  returnEarningsUsd?: number;
 };
 
 Deno.serve(async (req) => {
@@ -42,6 +44,15 @@ Deno.serve(async (req) => {
   const password = body.password;
   const role = body.role;
   const vaultName = body.vaultName?.trim();
+  const lockedBalanceUsd = body.lockedBalanceUsd;
+  const returnEarningsUsd = body.returnEarningsUsd;
+
+  if (lockedBalanceUsd !== undefined && (!Number.isFinite(lockedBalanceUsd) || lockedBalanceUsd < 0)) {
+    return json({ error: "lockedBalanceUsd must be a non-negative number" }, 400, cors);
+  }
+  if (returnEarningsUsd !== undefined && !Number.isFinite(returnEarningsUsd)) {
+    return json({ error: "returnEarningsUsd must be a number" }, 400, cors);
+  }
 
   if (password !== undefined && password.length < 8) {
     return json({ error: "Password must be at least 8 characters" }, 400, cors);
@@ -78,7 +89,12 @@ Deno.serve(async (req) => {
     if (profileError) return json({ error: profileError.message }, 500, cors);
   }
 
-  if (vaultName !== undefined && vaultName.length > 0) {
+  const walletUpdate: Record<string, unknown> = {};
+  if (vaultName !== undefined && vaultName.length > 0) walletUpdate.vault_name = vaultName;
+  if (lockedBalanceUsd !== undefined) walletUpdate.locked_balance_usd = lockedBalanceUsd;
+  if (returnEarningsUsd !== undefined) walletUpdate.return_earnings_usd = returnEarningsUsd;
+
+  if (Object.keys(walletUpdate).length > 0) {
     const { data: latest, error: findError } = await admin
       .from("wallet_applications")
       .select("id")
@@ -90,18 +106,20 @@ Deno.serve(async (req) => {
     if (latest) {
       const { error: updateError } = await admin
         .from("wallet_applications")
-        .update({ vault_name: vaultName, updated_at: new Date().toISOString() })
+        .update({ ...walletUpdate, updated_at: new Date().toISOString() })
         .eq("id", latest.id);
       if (updateError) return json({ error: updateError.message }, 500, cors);
     } else {
       const { error: createError } = await admin.from("wallet_applications").insert({
         user_id: userId,
-        vault_name: vaultName,
+        vault_name: typeof walletUpdate.vault_name === "string" ? walletUpdate.vault_name : "Main Vault",
         purpose: "auto",
         use_case: "auto",
         estimated_assets: "auto",
         status: "approved",
         balance_usd: 0,
+        locked_balance_usd: lockedBalanceUsd ?? 0,
+        return_earnings_usd: returnEarningsUsd ?? 0,
       });
       if (createError) return json({ error: createError.message }, 500, cors);
     }

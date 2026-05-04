@@ -12,7 +12,12 @@ type WalletApplication = {
   vault_name: string | null;
   connected_address: string | null;
   balance_usd: number | string | null;
+  locked_balance_usd: number | string | null;
+  return_earnings_usd: number | string | null;
 };
+
+const fmtUsd = (n: number) =>
+  new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(n);
 
 type DepositRow = {
   id: string;
@@ -48,7 +53,7 @@ export default function DashboardPage() {
       const [walletRes, depositsRes, assetsRes] = await Promise.all([
         supabase
           .from("wallet_applications")
-          .select("vault_name, connected_address, balance_usd")
+          .select("vault_name, connected_address, balance_usd, locked_balance_usd, return_earnings_usd")
           .eq("user_id", uid)
           .order("created_at", { ascending: false })
           .limit(1)
@@ -116,20 +121,53 @@ export default function DashboardPage() {
     );
   }
 
+  const totalUsd = Number(wallet?.balance_usd ?? 0);
+  const lockedUsd = Number(wallet?.locked_balance_usd ?? 0);
+  const returnUsd = Number(wallet?.return_earnings_usd ?? 0);
+  const availableUsd = Math.max(0, totalUsd - lockedUsd);
+  const activated = totalUsd > 0 || deposits.length > 0;
+
+  const allocation = (() => {
+    const totals = new Map<string, number>();
+    let sum = 0;
+    for (const d of deposits) {
+      const v = Number(d.amount_usd);
+      if (!Number.isFinite(v) || v <= 0) continue;
+      totals.set(d.asset, (totals.get(d.asset) ?? 0) + v);
+      sum += v;
+    }
+    if (sum === 0) return null;
+    const slices = Array.from(totals.entries())
+      .map(([asset, value]) => ({
+        asset,
+        value,
+        pct: (value / sum) * 100,
+        color: assetMeta[asset]?.color ?? "#666",
+        name: assetMeta[asset]?.name ?? asset,
+      }))
+      .sort((a, b) => b.value - a.value);
+    let cursor = 0;
+    const stops = slices.map((s) => {
+      const start = cursor;
+      cursor += s.pct;
+      return `${s.color} ${start}% ${cursor}%`;
+    });
+    return { slices, gradient: `conic-gradient(${stops.join(", ")})`, sum };
+  })();
+
   return (
     <main className="mx-auto max-w-7xl px-4 py-10 sm:px-6 sm:py-12">
       <div className="flex flex-col gap-2">
-        <p className="text-sm text-zinc-400">Welcome back</p>
+        <p className="text-sm text-zinc-400">
+          Welcome back{wallet?.vault_name ? `, ${wallet.vault_name}` : ""}
+        </p>
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
             <p className="text-xs uppercase tracking-wider text-zinc-500">
               Portfolio Value
             </p>
             <p className="font-display text-3xl font-semibold text-white sm:text-4xl md:text-5xl">
-              {new Intl.NumberFormat("en-US", {
-                style: "currency",
-                currency: "USD",
-              }).format(Number(wallet?.balance_usd ?? 0))}
+              {fmtUsd(totalUsd)}
             </p>
           </div>
           <ConnectButton.Custom>
@@ -186,6 +224,65 @@ export default function DashboardPage() {
           </ConnectButton.Custom>
         </div>
       </div>
+
+      {activated && (
+        <section className="mt-8 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <StatCard label="Total Portfolio" value={fmtUsd(totalUsd)} />
+          <StatCard label="Available Balance" value={fmtUsd(availableUsd)} />
+          <StatCard label="Locked / Staked" value={fmtUsd(lockedUsd)} />
+          <StatCard
+            label="Return Earnings"
+            value={`${returnUsd >= 0 ? "+" : "-"}${fmtUsd(Math.abs(returnUsd))}`}
+            tone={returnUsd >= 0 ? "positive" : "negative"}
+          />
+        </section>
+      )}
+
+      {activated && allocation && (
+        <section className="mt-10">
+          <h3 className="mb-4 text-sm font-semibold uppercase tracking-wider text-gold">
+            Asset Allocation
+          </h3>
+          <div className="flex flex-col items-center gap-6 rounded-2xl border border-border bg-surface p-6 sm:flex-row sm:items-start sm:gap-10">
+            <div
+              className="relative h-48 w-48 shrink-0 rounded-full"
+              style={{ background: allocation.gradient }}
+              aria-label="Asset allocation chart"
+              role="img"
+            >
+              <div className="absolute inset-[18%] flex flex-col items-center justify-center rounded-full bg-surface text-center">
+                <p className="text-[10px] uppercase tracking-wider text-zinc-500">
+                  Holdings
+                </p>
+                <p className="text-lg font-semibold text-white">
+                  {fmtUsd(allocation.sum)}
+                </p>
+              </div>
+            </div>
+            <ul className="flex-1 space-y-2 text-sm">
+              {allocation.slices.map((s) => (
+                <li
+                  key={s.asset}
+                  className="flex items-center justify-between gap-3 border-b border-border/60 pb-2 last:border-none"
+                >
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="h-3 w-3 rounded-full"
+                      style={{ backgroundColor: s.color }}
+                    />
+                    <span className="text-white">{s.name}</span>
+                    <span className="text-xs text-zinc-500">{s.asset}</span>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-white">{fmtUsd(s.value)}</p>
+                    <p className="text-xs text-zinc-500">{s.pct.toFixed(1)}%</p>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </section>
+      )}
 
       <section className="mt-10">
         <h3 className="mb-4 flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-gold">
@@ -274,15 +371,17 @@ export default function DashboardPage() {
         )}
       </section>
 
-      <section className="mt-10 rounded-2xl border border-dashed border-border bg-surface/40 p-6 text-center sm:p-10">
-        <h2 className="text-lg font-medium text-white">
-          Deposit crypto to activate your wallet environment
-        </h2>
-        <p className="mx-auto mt-2 max-w-md text-sm text-zinc-400">
-          Choose an asset below to view your deposit address. All deposits are
-          received into your DWP-secured custody wallet.
-        </p>
-      </section>
+      {!activated && (
+        <section className="mt-10 rounded-2xl border border-dashed border-border bg-surface/40 p-6 text-center sm:p-10">
+          <h2 className="text-lg font-medium text-white">
+            Deposit crypto to activate your wallet environment
+          </h2>
+          <p className="mx-auto mt-2 max-w-md text-sm text-zinc-400">
+            Choose an asset below to view your deposit address. All deposits are
+            received into your DWP-secured custody wallet.
+          </p>
+        </section>
+      )}
 
       <section className="mt-8">
         <h3 className="mb-4 text-sm font-semibold uppercase tracking-wider text-gold">
@@ -291,5 +390,28 @@ export default function DashboardPage() {
         <CryptoDepositGrid />
       </section>
     </main>
+  );
+}
+
+function StatCard({
+  label,
+  value,
+  tone = "neutral",
+}: {
+  label: string;
+  value: string;
+  tone?: "neutral" | "positive" | "negative";
+}) {
+  const valueColor =
+    tone === "positive"
+      ? "text-green-400"
+      : tone === "negative"
+        ? "text-red-400"
+        : "text-white";
+  return (
+    <div className="rounded-2xl border border-border bg-surface p-4">
+      <p className="text-[10px] uppercase tracking-wider text-zinc-500">{label}</p>
+      <p className={`mt-1 font-display text-xl font-semibold ${valueColor}`}>{value}</p>
+    </div>
   );
 }

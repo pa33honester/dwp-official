@@ -55,17 +55,27 @@ Deno.serve(async (req) => {
 
   const { data: wallets, error: walletsError } = await admin
     .from("wallet_applications")
-    .select("user_id, vault_name, balance_usd, created_at")
+    .select("user_id, vault_name, balance_usd, locked_balance_usd, return_earnings_usd, created_at")
     .in("user_id", userIds.length ? userIds : ["00000000-0000-0000-0000-000000000000"])
     .order("created_at", { ascending: false });
   if (walletsError) return json({ error: walletsError.message }, 500, cors);
-  const walletMap = new Map<string, { vaultName: string | null; balanceUsd: number }>();
+  const walletMap = new Map<
+    string,
+    {
+      vaultName: string | null;
+      balanceUsd: number;
+      lockedBalanceUsd: number;
+      returnEarningsUsd: number;
+    }
+  >();
   for (const w of wallets ?? []) {
     const uid = w.user_id as string;
     if (!walletMap.has(uid)) {
       walletMap.set(uid, {
         vaultName: (w.vault_name as string | null) ?? null,
         balanceUsd: Number(w.balance_usd ?? 0),
+        lockedBalanceUsd: Number(w.locked_balance_usd ?? 0),
+        returnEarningsUsd: Number(w.return_earnings_usd ?? 0),
       });
     }
   }
@@ -76,6 +86,8 @@ Deno.serve(async (req) => {
     fullName: profileMap.get(u.id) ?? null,
     vaultName: walletMap.get(u.id)?.vaultName ?? null,
     balanceUsd: walletMap.get(u.id)?.balanceUsd ?? 0,
+    lockedBalanceUsd: walletMap.get(u.id)?.lockedBalanceUsd ?? 0,
+    returnEarningsUsd: walletMap.get(u.id)?.returnEarningsUsd ?? 0,
     hasWallet: walletMap.has(u.id),
     role: u.role,
     createdAt: u.created_at,
