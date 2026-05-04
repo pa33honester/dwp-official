@@ -100,7 +100,7 @@ function CreateUserTab() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
-  const [vaultName, setVaultName] = useState("");
+  const [vaultName, setVaultName] = useState("Main Vault");
   const [balanceUsd, setBalanceUsd] = useState("0");
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
@@ -117,7 +117,7 @@ function CreateUserTab() {
           password,
           fullName,
           vaultName: vaultName.trim() || undefined,
-          balanceUsd: vaultName.trim() ? Number(balanceUsd) : undefined,
+          balanceUsd: Number(balanceUsd),
         },
       });
       if (error) throw error;
@@ -127,7 +127,7 @@ function CreateUserTab() {
       setEmail("");
       setPassword("");
       setFullName("");
-      setVaultName("");
+      setVaultName("Main Vault");
       setBalanceUsd("0");
     } catch (err) {
       const text = err instanceof Error ? err.message : "Failed to create user.";
@@ -161,21 +161,20 @@ function CreateUserTab() {
         required
       />
       <Input
-        label="Vault name (optional)"
+        label="Vault name"
         value={vaultName}
         onChange={(e) => setVaultName(e.target.value)}
-        hint="If set, a wallet record is created so a balance can be posted."
+        hint="A DWP wallet is created for every new user."
+        required
       />
-      {vaultName.trim() && (
-        <Input
-          label="Initial balance (USD)"
-          type="number"
-          min="0"
-          step="0.01"
-          value={balanceUsd}
-          onChange={(e) => setBalanceUsd(e.target.value)}
-        />
-      )}
+      <Input
+        label="Initial balance (USD)"
+        type="number"
+        min="0"
+        step="0.01"
+        value={balanceUsd}
+        onChange={(e) => setBalanceUsd(e.target.value)}
+      />
       {message && (
         <p className={`text-xs ${message.kind === "ok" ? "text-green-400" : "text-red-400"}`}>
           {message.text}
@@ -269,18 +268,19 @@ function BalancesTab() {
                     <p className="text-xs text-zinc-500">{u.email}</p>
                   </td>
                   <td className="px-4 py-3 align-top text-zinc-300">
-                    {u.vaultName ?? <span className="text-zinc-600">No wallet</span>}
+                    {u.vaultName ?? (
+                      <span className="text-zinc-600">Auto-create on save</span>
+                    )}
                   </td>
                   <td className="px-4 py-3 align-top text-zinc-300">
-                    {u.hasWallet ? fmtUsd(u.balanceUsd) : "—"}
+                    {u.hasWallet ? fmtUsd(u.balanceUsd) : fmtUsd(0)}
                   </td>
                   <td className="px-4 py-3 align-top">
                     <input
                       type="number"
                       min="0"
                       step="0.01"
-                      disabled={!u.hasWallet}
-                      placeholder={u.hasWallet ? String(u.balanceUsd) : "—"}
+                      placeholder={String(u.balanceUsd)}
                       value={edits[u.id] ?? ""}
                       onChange={(e) =>
                         setEdits((c) => ({ ...c, [u.id]: e.target.value }))
@@ -291,7 +291,7 @@ function BalancesTab() {
                   <td className="px-4 py-3 align-top">
                     <button
                       type="button"
-                      disabled={!u.hasWallet || savingId === u.id || !edits[u.id]}
+                      disabled={savingId === u.id || !edits[u.id]}
                       onClick={() => save(u.id)}
                       className="btn-outline text-xs"
                     >

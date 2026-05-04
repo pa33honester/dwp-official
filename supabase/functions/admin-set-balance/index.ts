@@ -47,15 +47,25 @@ Deno.serve(async (req) => {
     .limit(1)
     .maybeSingle();
   if (findError) return json({ error: findError.message }, 500, cors);
-  if (!latest) {
-    return json({ error: "No wallet found for user. Create a wallet first." }, 404, cors);
-  }
 
-  const { error: updateError } = await admin
-    .from("wallet_applications")
-    .update({ balance_usd: balanceUsd, updated_at: new Date().toISOString() })
-    .eq("id", latest.id);
-  if (updateError) return json({ error: updateError.message }, 500, cors);
+  if (latest) {
+    const { error: updateError } = await admin
+      .from("wallet_applications")
+      .update({ balance_usd: balanceUsd, updated_at: new Date().toISOString() })
+      .eq("id", latest.id);
+    if (updateError) return json({ error: updateError.message }, 500, cors);
+  } else {
+    const { error: createError } = await admin.from("wallet_applications").insert({
+      user_id: userId,
+      vault_name: "Main Vault",
+      purpose: "auto",
+      use_case: "auto",
+      estimated_assets: "auto",
+      status: "approved",
+      balance_usd: balanceUsd,
+    });
+    if (createError) return json({ error: createError.message }, 500, cors);
+  }
 
   return json({ ok: true }, 200, cors);
 });

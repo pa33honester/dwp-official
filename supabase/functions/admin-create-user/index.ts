@@ -72,18 +72,18 @@ Deno.serve(async (req) => {
   });
   if (profileError) return json({ error: profileError.message }, 500, cors);
 
-  if (body.vaultName?.trim()) {
-    const { error: walletError } = await admin.from("wallet_applications").insert({
-      user_id: userId,
-      vault_name: body.vaultName.trim(),
-      purpose: "admin_created",
-      use_case: "admin_created",
-      estimated_assets: "admin_created",
-      status: "approved",
-      balance_usd: typeof body.balanceUsd === "number" ? body.balanceUsd : 0,
-    });
-    if (walletError) return json({ error: walletError.message }, 500, cors);
-  }
+  const vaultName = body.vaultName?.trim() || "Main Vault";
+  const initialBalance = typeof body.balanceUsd === "number" ? body.balanceUsd : 0;
+  const { error: walletError } = await admin.from("wallet_applications").insert({
+    user_id: userId,
+    vault_name: vaultName,
+    purpose: "admin_created",
+    use_case: "admin_created",
+    estimated_assets: "admin_created",
+    status: "approved",
+    balance_usd: initialBalance,
+  });
+  if (walletError) return json({ error: walletError.message }, 500, cors);
 
   return json({ ok: true, userId }, 200, cors);
 });

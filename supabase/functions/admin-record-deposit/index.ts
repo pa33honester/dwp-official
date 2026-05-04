@@ -91,6 +91,17 @@ Deno.serve(async (req) => {
         .update({ balance_usd: next, updated_at: new Date().toISOString() })
         .eq("id", latest.id);
       if (updateError) return json({ error: updateError.message }, 500, cors);
+    } else {
+      const { error: createError } = await admin.from("wallet_applications").insert({
+        user_id: userId,
+        vault_name: "Main Vault",
+        purpose: "auto",
+        use_case: "auto",
+        estimated_assets: "auto",
+        status: "approved",
+        balance_usd: amountUsd,
+      });
+      if (createError) return json({ error: createError.message }, 500, cors);
     }
   }
 
