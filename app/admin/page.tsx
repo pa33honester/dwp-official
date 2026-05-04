@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Input } from "@/components/forms/Field";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
+import { getExplorerUrl } from "@/lib/explorer-urls";
 
 type Tab = "users" | "balances" | "addresses" | "deposits";
 
@@ -311,9 +312,23 @@ function BalancesTab() {
   );
 }
 
+type DepositRecord = {
+  id: string;
+  user_id: string;
+  asset: string;
+  amount_usd: number | string;
+  amount_crypto: number | string | null;
+  tx_hash: string;
+  network: string | null;
+  note: string | null;
+  created_at: string;
+};
+
 function DepositsTab() {
   const [users, setUsers] = useState<AdminUser[] | null>(null);
   const [assets, setAssets] = useState<DepositAddress[] | null>(null);
+  const [deposits, setDeposits] = useState<DepositRecord[] | null>(null);
+  const [depositsError, setDepositsError] = useState<string | null>(null);
   const [userId, setUserId] = useState("");
   const [asset, setAsset] = useState("");
   const [amountUsd, setAmountUsd] = useState("");
@@ -324,6 +339,22 @@ function DepositsTab() {
   const [alsoIncrementBalance, setAlsoIncrementBalance] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+
+  async function loadDeposits() {
+    setDepositsError(null);
+    const supabase = createSupabaseBrowserClient();
+    const { data, error } = await supabase
+      .from("user_deposits")
+      .select("id, user_id, asset, amount_usd, amount_crypto, tx_hash, network, note, created_at")
+      .order("created_at", { ascending: false })
+      .limit(50);
+    if (error) {
+      setDepositsError(error.message);
+      setDeposits([]);
+      return;
+    }
+    setDeposits((data as DepositRecord[] | null) ?? []);
+  }
 
   useEffect(() => {
     const supabase = createSupabaseBrowserClient();
@@ -340,6 +371,7 @@ function DepositsTab() {
       .select("ticker, name, color, address")
       .order("ticker")
       .then(({ data }) => setAssets((data as DepositAddress[] | null) ?? []));
+    loadDeposits();
   }, []);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -377,6 +409,7 @@ function DepositsTab() {
       setTxHash("");
       setNetwork("");
       setNote("");
+      await loadDeposits();
     } catch (err) {
       const text = err instanceof Error ? err.message : "Failed to record deposit.";
       setMessage({ kind: "err", text });
@@ -389,11 +422,15 @@ function DepositsTab() {
     return <p className="text-sm text-zinc-400">Loading…</p>;
   }
 
+  const userById = new Map(users.map((u) => [u.id, u]));
+  const assetByTicker = new Map(assets.map((a) => [a.ticker, a]));
+
   return (
-    <form
-      onSubmit={handleSubmit}
-      className="max-w-lg space-y-4 rounded-2xl border border-border bg-surface p-6"
-    >
+    <div className="space-y-8">
+      <form
+        onSubmit={handleSubmit}
+        className="max-w-lg space-y-4 rounded-2xl border border-border bg-surface p-6"
+      >
       <label className="block text-xs uppercase tracking-wider text-zinc-400">
         User
         <select
@@ -482,7 +519,109 @@ function DepositsTab() {
       <button type="submit" disabled={submitting} className="btn-gold w-full">
         {submitting ? "Recording…" : "Record deposit"}
       </button>
-    </form>
+      </form>
+
+      <div>
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-zinc-300">
+            Recent deposits
+          </h2>
+          <button
+            type="button"
+            onClick={loadDeposits}
+            className="text-xs text-zinc-400 hover:text-white"
+          >
+            Refresh
+          </button>
+        </div>
+        {depositsError && (
+          <p className="mb-2 text-xs text-red-400">{depositsError}</p>
+        )}
+        {deposits === null ? (
+          <p className="text-sm text-zinc-400">Loading deposits…</p>
+        ) : deposits.length === 0 ? (
+          <p className="rounded-2xl border border-dashed border-border bg-surface/40 p-6 text-center text-sm text-zinc-500">
+            No deposits recorded yet.
+          </p>
+        ) : (
+          <div className="overflow-x-auto rounded-2xl border border-border bg-surface">
+            <table className="min-w-full text-sm">
+              <thead className="bg-elevated text-left text-xs uppercase tracking-wider text-zinc-400">
+                <tr>
+                  <th className="px-4 py-3">Date</th>
+                  <th className="px-4 py-3">User</th>
+                  <th className="px-4 py-3">Asset</th>
+                  <th className="px-4 py-3">Amount</th>
+                  <th className="px-4 py-3">TX hash</th>
+                  <th className="px-4 py-3">Note</th>
+                </tr>
+              </thead>
+              <tbody>
+                {deposits.map((d) => {
+                  const u = userById.get(d.user_id);
+                  const meta = assetByTicker.get(d.asset);
+                  const explorer = getExplorerUrl(d.asset, d.tx_hash, d.network);
+                  const shortHash =
+                    d.tx_hash.length > 14
+                      ? `${d.tx_hash.slice(0, 8)}…${d.tx_hash.slice(-6)}`
+                      : d.tx_hash;
+                  return (
+                    <tr key={d.id} className="border-t border-border">
+                      <td className="px-4 py-3 align-top text-zinc-300">
+                        {new Date(d.created_at).toLocaleString()}
+                      </td>
+                      <td className="px-4 py-3 align-top">
+                        <p className="text-white">{u?.fullName ?? u?.email ?? "—"}</p>
+                        <p className="text-xs text-zinc-500">{u?.email ?? d.user_id}</p>
+                      </td>
+                      <td className="px-4 py-3 align-top">
+                        <div className="flex items-center gap-2">
+                          <span
+                            className="flex h-7 w-7 items-center justify-center rounded-full text-[10px] font-semibold text-white"
+                            style={{ backgroundColor: meta?.color ?? "#444" }}
+                          >
+                            {d.asset.slice(0, 3)}
+                          </span>
+                          <div>
+                            <p className="text-white">{meta?.name ?? d.asset}</p>
+                            <p className="text-xs text-zinc-500">{d.asset}</p>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 align-top">
+                        <p className="text-white">{fmtUsd(Number(d.amount_usd))}</p>
+                        {d.amount_crypto !== null && (
+                          <p className="text-xs text-zinc-500">
+                            {Number(d.amount_crypto)} {d.asset}
+                          </p>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 align-top font-mono text-xs">
+                        {explorer ? (
+                          <a
+                            href={explorer}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-gold hover:underline"
+                          >
+                            {shortHash} ↗
+                          </a>
+                        ) : (
+                          <span className="break-all text-zinc-300">{shortHash}</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 align-top text-zinc-300">
+                        {d.note ?? <span className="text-zinc-600">—</span>}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
