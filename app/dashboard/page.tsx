@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { ConnectButton } from "@rainbow-me/rainbowkit";
+import { useAccount } from "wagmi";
 import { CryptoDepositGrid } from "@/components/CryptoDepositGrid";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { getExplorerUrl } from "@/lib/explorer-urls";
@@ -31,6 +33,8 @@ export default function DashboardPage() {
   const [wallet, setWallet] = useState<WalletApplication | null>(null);
   const [deposits, setDeposits] = useState<DepositRow[]>([]);
   const [assetMeta, setAssetMeta] = useState<Record<string, AssetMeta>>({});
+  const [userId, setUserId] = useState<string | null>(null);
+  const { address, connector, isConnected } = useAccount();
 
   useEffect(() => {
     const supabase = createSupabaseBrowserClient();
@@ -39,19 +43,20 @@ export default function DashboardPage() {
         router.replace("/login");
         return;
       }
-      const userId = data.session.user.id;
+      const uid = data.session.user.id;
+      setUserId(uid);
       const [walletRes, depositsRes, assetsRes] = await Promise.all([
         supabase
           .from("wallet_applications")
           .select("vault_name, connected_address, balance_usd")
-          .eq("user_id", userId)
+          .eq("user_id", uid)
           .order("created_at", { ascending: false })
           .limit(1)
           .maybeSingle(),
         supabase
           .from("user_deposits")
           .select("id, asset, amount_usd, amount_crypto, tx_hash, network, note, created_at")
-          .eq("user_id", userId)
+          .eq("user_id", uid)
           .order("created_at", { ascending: false })
           .limit(25),
         supabase.from("deposit_addresses").select("ticker, name, color"),
@@ -67,6 +72,40 @@ export default function DashboardPage() {
     });
   }, [router]);
 
+  useEffect(() => {
+    if (!userId) return;
+    const supabase = createSupabaseBrowserClient();
+    const nextAddress = isConnected && address ? address : null;
+    const nextConnector = isConnected && connector?.name ? connector.name : null;
+    if (
+      (wallet?.connected_address ?? null) === nextAddress &&
+      (nextAddress === null || wallet?.connected_address === nextAddress)
+    ) {
+      return;
+    }
+    (async () => {
+      const { data: latest } = await supabase
+        .from("wallet_applications")
+        .select("id")
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (!latest) return;
+      await supabase
+        .from("wallet_applications")
+        .update({
+          connected_address: nextAddress,
+          connector_type: nextConnector,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", latest.id);
+      setWallet((prev) =>
+        prev ? { ...prev, connected_address: nextAddress } : prev,
+      );
+    })();
+  }, [userId, address, connector, isConnected, wallet?.connected_address]);
+
   if (!ready) {
     return (
       <main className="mx-auto max-w-7xl px-4 py-10 sm:px-6 sm:py-12">
@@ -76,8 +115,6 @@ export default function DashboardPage() {
       </main>
     );
   }
-
-  const connected = Boolean(wallet?.connected_address);
 
   return (
     <main className="mx-auto max-w-7xl px-4 py-10 sm:px-6 sm:py-12">
@@ -95,14 +132,58 @@ export default function DashboardPage() {
               }).format(Number(wallet?.balance_usd ?? 0))}
             </p>
           </div>
-          <div className="rounded-md border border-border bg-elevated px-3 py-1.5 text-xs text-zinc-400 break-all">
-            Wallet:{" "}
-            <span className="text-gold">
-              {connected
-                ? `${wallet?.connected_address?.slice(0, 6)}…${wallet?.connected_address?.slice(-4)}`
-                : "Not connected"}
-            </span>
-          </div>
+          <ConnectButton.Custom>
+            {({
+              account,
+              chain,
+              openAccountModal,
+              openChainModal,
+              openConnectModal,
+              mounted,
+            }) => {
+              const ready = mounted;
+              const connected = ready && account && chain;
+              if (!ready) {
+                return (
+                  <div
+                    aria-hidden
+                    style={{ opacity: 0, pointerEvents: "none", userSelect: "none" }}
+                  />
+                );
+              }
+              if (!connected) {
+                return (
+                  <button
+                    type="button"
+                    onClick={openConnectModal}
+                    className="btn-gold text-sm"
+                  >
+                    Connect Wallet
+                  </button>
+                );
+              }
+              if (chain.unsupported) {
+                return (
+                  <button
+                    type="button"
+                    onClick={openChainModal}
+                    className="btn-outline text-xs text-red-400"
+                  >
+                    Wrong network
+                  </button>
+                );
+              }
+              return (
+                <button
+                  type="button"
+                  onClick={openAccountModal}
+                  className="rounded-md border border-border bg-elevated px-3 py-1.5 text-xs text-zinc-400 break-all hover:border-gold/40"
+                >
+                  Wallet: <span className="text-gold">{account.displayName}</span>
+                </button>
+              );
+            }}
+          </ConnectButton.Custom>
         </div>
       </div>
 
