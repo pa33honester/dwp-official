@@ -15,6 +15,7 @@ type AdminUser = {
   vaultName: string | null;
   balanceUsd: number;
   hasWallet: boolean;
+  role: "admin" | "user" | null;
   createdAt: string;
 };
 
@@ -66,7 +67,7 @@ export default function AdminPage() {
         {(
           [
             ["users", "Create User"],
-            ["balances", "Balances"],
+            ["balances", "Users"],
             ["deposits", "Record Deposit"],
             ["addresses", "Deposit Addresses"],
           ] as Array<[Tab, string]>
@@ -88,7 +89,7 @@ export default function AdminPage() {
 
       <div className="mt-8">
         {tab === "users" && <CreateUserTab />}
-        {tab === "balances" && <BalancesTab />}
+        {tab === "balances" && <UsersTab />}
         {tab === "deposits" && <DepositsTab />}
         {tab === "addresses" && <AddressesTab />}
       </div>
@@ -187,12 +188,15 @@ function CreateUserTab() {
   );
 }
 
-function BalancesTab() {
+function UsersTab() {
   const [users, setUsers] = useState<AdminUser[] | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [edits, setEdits] = useState<Record<string, string>>({});
   const [savingId, setSavingId] = useState<string | null>(null);
   const [savedId, setSavedId] = useState<string | null>(null);
+  const [editing, setEditing] = useState<AdminUser | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   async function load() {
     setError(null);
@@ -211,10 +215,14 @@ function BalancesTab() {
   }
 
   useEffect(() => {
+    const supabase = createSupabaseBrowserClient();
+    supabase.auth.getSession().then(({ data }) => {
+      setCurrentUserId(data.session?.user.id ?? null);
+    });
     load();
   }, []);
 
-  async function save(userId: string) {
+  async function saveBalance(userId: string) {
     setSavingId(userId);
     setError(null);
     try {
@@ -239,6 +247,26 @@ function BalancesTab() {
     }
   }
 
+  async function deleteUser(u: AdminUser) {
+    if (!window.confirm(`Delete ${u.email ?? u.id}? This cannot be undone.`)) return;
+    setDeletingId(u.id);
+    setError(null);
+    try {
+      const supabase = createSupabaseBrowserClient();
+      const { data, error: invokeError } = await supabase.functions.invoke("admin-delete-user", {
+        body: { userId: u.id },
+      });
+      if (invokeError) throw invokeError;
+      const payload = data as { ok?: boolean; error?: string };
+      if (!payload?.ok) throw new Error(payload?.error ?? "Failed");
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete user.");
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
   if (users === null) {
     return <p className="text-sm text-zinc-400">Loading users…</p>;
   }
@@ -257,57 +285,225 @@ function BalancesTab() {
                 <th className="px-4 py-3">Vault</th>
                 <th className="px-4 py-3">Current balance</th>
                 <th className="px-4 py-3">Set balance (USD)</th>
-                <th className="px-4 py-3"></th>
+                <th className="px-4 py-3">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {users.map((u) => (
-                <tr key={u.id} className="border-t border-border">
-                  <td className="px-4 py-3 align-top">
-                    <p className="text-white">{u.fullName ?? "—"}</p>
-                    <p className="text-xs text-zinc-500">{u.email}</p>
-                  </td>
-                  <td className="px-4 py-3 align-top text-zinc-300">
-                    {u.vaultName ?? (
-                      <span className="text-zinc-600">Auto-create on save</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3 align-top text-zinc-300">
-                    {u.hasWallet ? fmtUsd(u.balanceUsd) : fmtUsd(0)}
-                  </td>
-                  <td className="px-4 py-3 align-top">
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      placeholder={String(u.balanceUsd)}
-                      value={edits[u.id] ?? ""}
-                      onChange={(e) =>
-                        setEdits((c) => ({ ...c, [u.id]: e.target.value }))
-                      }
-                      className="input w-32"
-                    />
-                  </td>
-                  <td className="px-4 py-3 align-top">
-                    <button
-                      type="button"
-                      disabled={savingId === u.id || !edits[u.id]}
-                      onClick={() => save(u.id)}
-                      className="btn-outline text-xs"
-                    >
-                      {savingId === u.id
-                        ? "Saving…"
-                        : savedId === u.id
-                          ? "Saved"
-                          : "Save"}
-                    </button>
-                  </td>
-                </tr>
-              ))}
+              {users.map((u) => {
+                const isSelf = u.id === currentUserId;
+                return (
+                  <tr key={u.id} className="border-t border-border">
+                    <td className="px-4 py-3 align-top">
+                      <div className="flex items-center gap-2">
+                        <p className="text-white">{u.fullName ?? "—"}</p>
+                        {u.role === "admin" && (
+                          <span className="rounded-full bg-gold/15 px-2 py-0.5 text-[10px] font-semibold text-gold">
+                            Admin
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-zinc-500">{u.email}</p>
+                    </td>
+                    <td className="px-4 py-3 align-top text-zinc-300">
+                      {u.vaultName ?? (
+                        <span className="text-zinc-600">Auto-create on save</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 align-top text-zinc-300">
+                      {u.hasWallet ? fmtUsd(u.balanceUsd) : fmtUsd(0)}
+                    </td>
+                    <td className="px-4 py-3 align-top">
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        placeholder={String(u.balanceUsd)}
+                        value={edits[u.id] ?? ""}
+                        onChange={(e) =>
+                          setEdits((c) => ({ ...c, [u.id]: e.target.value }))
+                        }
+                        className="input w-32"
+                      />
+                      <button
+                        type="button"
+                        disabled={savingId === u.id || !edits[u.id]}
+                        onClick={() => saveBalance(u.id)}
+                        className="btn-outline ml-2 text-xs"
+                      >
+                        {savingId === u.id
+                          ? "Saving…"
+                          : savedId === u.id
+                            ? "Saved"
+                            : "Save"}
+                      </button>
+                    </td>
+                    <td className="px-4 py-3 align-top">
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setEditing(u)}
+                          className="btn-outline text-xs"
+                        >
+                          Edit
+                        </button>
+                        {!isSelf && u.role !== "admin" && (
+                          <button
+                            type="button"
+                            onClick={() => deleteUser(u)}
+                            disabled={deletingId === u.id}
+                            className="text-xs text-red-400 hover:text-red-300 disabled:text-zinc-600"
+                          >
+                            {deletingId === u.id ? "Deleting…" : "Delete"}
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
       )}
+
+      {editing && (
+        <EditUserDialog
+          user={editing}
+          isSelf={editing.id === currentUserId}
+          onClose={() => setEditing(null)}
+          onSaved={async () => {
+            setEditing(null);
+            await load();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function EditUserDialog({
+  user,
+  isSelf,
+  onClose,
+  onSaved,
+}: {
+  user: AdminUser;
+  isSelf: boolean;
+  onClose: () => void;
+  onSaved: () => void | Promise<void>;
+}) {
+  const [fullName, setFullName] = useState(user.fullName ?? "");
+  const [email, setEmail] = useState(user.email ?? "");
+  const [password, setPassword] = useState("");
+  const [role, setRole] = useState<"admin" | "user">(user.role === "admin" ? "admin" : "user");
+  const [vaultName, setVaultName] = useState(user.vaultName ?? "");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setSubmitting(true);
+    setError(null);
+    try {
+      type Body = {
+        userId: string;
+        fullName?: string;
+        email?: string;
+        password?: string;
+        role?: "admin" | "user";
+        vaultName?: string;
+      };
+      const body: Body = { userId: user.id };
+      if (fullName.trim() && fullName.trim() !== (user.fullName ?? "")) {
+        body.fullName = fullName.trim();
+      }
+      if (email.trim() && email.trim() !== (user.email ?? "")) {
+        body.email = email.trim();
+      }
+      if (password) body.password = password;
+      if (role !== (user.role === "admin" ? "admin" : "user")) body.role = role;
+      if (vaultName.trim() && vaultName.trim() !== (user.vaultName ?? "")) {
+        body.vaultName = vaultName.trim();
+      }
+
+      const supabase = createSupabaseBrowserClient();
+      const { data, error: invokeError } = await supabase.functions.invoke("admin-update-user", {
+        body,
+      });
+      if (invokeError) throw invokeError;
+      const payload = data as { ok?: boolean; error?: string };
+      if (!payload?.ok) throw new Error(payload?.error ?? "Failed");
+      await onSaved();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to update user.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4"
+      onClick={onClose}
+    >
+      <form
+        onSubmit={handleSubmit}
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-lg space-y-4 rounded-2xl border border-border bg-surface p-6"
+      >
+        <h3 className="font-display text-xl font-semibold text-white">Edit user</h3>
+        <Input
+          label="Full name"
+          value={fullName}
+          onChange={(e) => setFullName(e.target.value)}
+        />
+        <Input
+          label="Email"
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+        />
+        <Input
+          label="New password (leave blank to keep)"
+          type="text"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          hint="Minimum 8 characters."
+        />
+        <label className="block text-xs uppercase tracking-wider text-zinc-400">
+          Role
+          <select
+            value={role}
+            onChange={(e) => setRole(e.target.value as "admin" | "user")}
+            disabled={isSelf}
+            className="input mt-1 w-full"
+          >
+            <option value="user">User</option>
+            <option value="admin">Admin</option>
+          </select>
+          {isSelf && (
+            <span className="mt-1 block text-[10px] text-zinc-500">
+              You can&apos;t change your own role.
+            </span>
+          )}
+        </label>
+        <Input
+          label="Vault name"
+          value={vaultName}
+          onChange={(e) => setVaultName(e.target.value)}
+        />
+        {error && <p className="text-xs text-red-400">{error}</p>}
+        <div className="flex justify-end gap-2 pt-2">
+          <button type="button" onClick={onClose} className="btn-outline text-xs">
+            Cancel
+          </button>
+          <button type="submit" disabled={submitting} className="btn-gold text-xs">
+            {submitting ? "Saving…" : "Save changes"}
+          </button>
+        </div>
+      </form>
     </div>
   );
 }

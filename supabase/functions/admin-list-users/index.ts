@@ -70,17 +70,16 @@ Deno.serve(async (req) => {
     }
   }
 
-  const users = authUsers
-    .filter((u) => u.role !== "admin")
-    .map((u) => ({
-      id: u.id,
-      email: u.email ?? null,
-      fullName: profileMap.get(u.id) ?? null,
-      vaultName: walletMap.get(u.id)?.vaultName ?? null,
-      balanceUsd: walletMap.get(u.id)?.balanceUsd ?? 0,
-      hasWallet: walletMap.has(u.id),
-      createdAt: u.created_at,
-    }));
+  const users = authUsers.map((u) => ({
+    id: u.id,
+    email: u.email ?? null,
+    fullName: profileMap.get(u.id) ?? null,
+    vaultName: walletMap.get(u.id)?.vaultName ?? null,
+    balanceUsd: walletMap.get(u.id)?.balanceUsd ?? 0,
+    hasWallet: walletMap.has(u.id),
+    role: u.role,
+    createdAt: u.created_at,
+  }));
 
   return json({ users }, 200, cors);
 });
