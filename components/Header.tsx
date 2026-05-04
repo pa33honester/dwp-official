@@ -19,16 +19,21 @@ export function Header() {
   const [open, setOpen] = useState(false);
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [email, setEmail] = useState<string | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
     const supabase = createSupabaseBrowserClient();
+    const readRole = (session: { user: { app_metadata?: unknown } } | null) =>
+      (session?.user.app_metadata as Record<string, unknown> | undefined)?.role === "admin";
     supabase.auth.getSession().then(({ data }) => {
       setAuthed(Boolean(data.session));
       setEmail(data.session?.user.email ?? null);
+      setIsAdmin(readRole(data.session));
     });
     const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
       setAuthed(Boolean(session));
       setEmail(session?.user.email ?? null);
+      setIsAdmin(readRole(session));
     });
     return () => {
       sub.subscription.unsubscribe();
@@ -51,7 +56,9 @@ export function Header() {
   }
 
   const navItems = authed
-    ? [...PUBLIC_NAV, { label: "Dashboard", href: "/dashboard" }]
+    ? isAdmin
+      ? [...PUBLIC_NAV, { label: "Admin", href: "/admin" }]
+      : [...PUBLIC_NAV, { label: "Dashboard", href: "/dashboard" }]
     : [...PUBLIC_NAV, { label: "Login", href: "/login" }];
 
   return (
