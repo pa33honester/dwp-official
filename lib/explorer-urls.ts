@@ -15,6 +15,14 @@ const EXPLORERS: Record<ExplorerKey, (hash: string) => string> = {
   DOGE: (h) => `https://blockchair.com/dogecoin/transaction/${h}`,
 };
 
+export const MULTI_CHAIN_ASSETS: Record<string, Array<{ value: string; label: string }>> = {
+  USDT: [
+    { value: "ETH", label: "Ethereum (ERC-20)" },
+    { value: "TRX", label: "Tron (TRC-20)" },
+    { value: "SOL", label: "Solana (SPL)" },
+  ],
+};
+
 export function getExplorerUrl(
   asset: string,
   txHash: string,

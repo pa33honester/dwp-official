@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Input } from "@/components/forms/Field";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
-import { getExplorerUrl } from "@/lib/explorer-urls";
+import { getExplorerUrl, MULTI_CHAIN_ASSETS } from "@/lib/explorer-urls";
 
 type Tab = "users" | "balances" | "addresses" | "deposits";
 
@@ -453,7 +453,12 @@ function DepositsTab() {
         <select
           required
           value={asset}
-          onChange={(e) => setAsset(e.target.value)}
+          onChange={(e) => {
+            const next = e.target.value;
+            setAsset(next);
+            const opts = MULTI_CHAIN_ASSETS[next];
+            setNetwork(opts ? opts[0].value : "");
+          }}
           className="input mt-1 w-full"
         >
           <option value="">Select an asset…</option>
@@ -490,12 +495,23 @@ function DepositsTab() {
         hint="Used as proof; will link to the relevant block explorer."
         required
       />
-      <Input
-        label="Network (optional)"
-        value={network}
-        onChange={(e) => setNetwork(e.target.value)}
-        hint="Override for multi-chain assets, e.g. TRX or SOL for USDT."
-      />
+      {MULTI_CHAIN_ASSETS[asset] && (
+        <label className="block text-xs uppercase tracking-wider text-zinc-400">
+          Network
+          <select
+            required
+            value={network}
+            onChange={(e) => setNetwork(e.target.value)}
+            className="input mt-1 w-full"
+          >
+            {MULTI_CHAIN_ASSETS[asset].map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
       <Input
         label="Note (optional)"
         value={note}
