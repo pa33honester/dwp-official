@@ -10,3 +10,4 @@ out
 tsconfig.tsbuildinfo
 supabase/.temp
 supabase/.branches
+feedback/

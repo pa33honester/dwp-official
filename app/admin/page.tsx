@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Input } from "@/components/forms/Field";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 
-type Tab = "users" | "balances" | "addresses";
+type Tab = "users" | "balances" | "addresses" | "deposits";
 
 type AdminUser = {
   id: string;
@@ -66,6 +66,7 @@ export default function AdminPage() {
           [
             ["users", "Create User"],
             ["balances", "Balances"],
+            ["deposits", "Record Deposit"],
             ["addresses", "Deposit Addresses"],
           ] as Array<[Tab, string]>
         ).map(([key, label]) => (
@@ -87,6 +88,7 @@ export default function AdminPage() {
       <div className="mt-8">
         {tab === "users" && <CreateUserTab />}
         {tab === "balances" && <BalancesTab />}
+        {tab === "deposits" && <DepositsTab />}
         {tab === "addresses" && <AddressesTab />}
       </div>
     </main>
@@ -306,6 +308,181 @@ function BalancesTab() {
         </div>
       )}
     </div>
+  );
+}
+
+function DepositsTab() {
+  const [users, setUsers] = useState<AdminUser[] | null>(null);
+  const [assets, setAssets] = useState<DepositAddress[] | null>(null);
+  const [userId, setUserId] = useState("");
+  const [asset, setAsset] = useState("");
+  const [amountUsd, setAmountUsd] = useState("");
+  const [amountCrypto, setAmountCrypto] = useState("");
+  const [txHash, setTxHash] = useState("");
+  const [network, setNetwork] = useState("");
+  const [note, setNote] = useState("");
+  const [alsoIncrementBalance, setAlsoIncrementBalance] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [message, setMessage] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+
+  useEffect(() => {
+    const supabase = createSupabaseBrowserClient();
+    supabase.functions.invoke("admin-list-users", { body: {} }).then(({ data, error }) => {
+      if (error) {
+        setUsers([]);
+        return;
+      }
+      const payload = data as { users?: AdminUser[] };
+      setUsers(payload?.users ?? []);
+    });
+    supabase
+      .from("deposit_addresses")
+      .select("ticker, name, color, address")
+      .order("ticker")
+      .then(({ data }) => setAssets((data as DepositAddress[] | null) ?? []));
+  }, []);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setSubmitting(true);
+    setMessage(null);
+    try {
+      const usd = Number(amountUsd);
+      if (!Number.isFinite(usd) || usd <= 0) {
+        throw new Error("Amount (USD) must be a positive number.");
+      }
+      const crypto = amountCrypto.trim() ? Number(amountCrypto) : null;
+      if (crypto !== null && (!Number.isFinite(crypto) || crypto <= 0)) {
+        throw new Error("Amount (crypto) must be a positive number if provided.");
+      }
+      const supabase = createSupabaseBrowserClient();
+      const { data, error } = await supabase.functions.invoke("admin-record-deposit", {
+        body: {
+          userId,
+          asset,
+          amountUsd: usd,
+          amountCrypto: crypto,
+          txHash: txHash.trim(),
+          network: network.trim() || null,
+          note: note.trim() || null,
+          alsoIncrementBalance,
+        },
+      });
+      if (error) throw error;
+      const payload = data as { ok?: boolean; error?: string; depositId?: string };
+      if (!payload?.ok) throw new Error(payload?.error ?? "Failed");
+      setMessage({ kind: "ok", text: `Deposit recorded (${payload.depositId}).` });
+      setAmountUsd("");
+      setAmountCrypto("");
+      setTxHash("");
+      setNetwork("");
+      setNote("");
+    } catch (err) {
+      const text = err instanceof Error ? err.message : "Failed to record deposit.";
+      setMessage({ kind: "err", text });
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  if (users === null || assets === null) {
+    return <p className="text-sm text-zinc-400">Loading…</p>;
+  }
+
+  return (
+    <form
+      onSubmit={handleSubmit}
+      className="max-w-lg space-y-4 rounded-2xl border border-border bg-surface p-6"
+    >
+      <label className="block text-xs uppercase tracking-wider text-zinc-400">
+        User
+        <select
+          required
+          value={userId}
+          onChange={(e) => setUserId(e.target.value)}
+          className="input mt-1 w-full"
+        >
+          <option value="">Select a user…</option>
+          {users.map((u) => (
+            <option key={u.id} value={u.id}>
+              {(u.fullName ?? u.email) ?? u.id} {u.email ? `(${u.email})` : ""}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <label className="block text-xs uppercase tracking-wider text-zinc-400">
+        Asset
+        <select
+          required
+          value={asset}
+          onChange={(e) => setAsset(e.target.value)}
+          className="input mt-1 w-full"
+        >
+          <option value="">Select an asset…</option>
+          {assets.map((a) => (
+            <option key={a.ticker} value={a.ticker}>
+              {a.name} ({a.ticker})
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <Input
+        label="Amount (USD)"
+        type="number"
+        min="0"
+        step="0.01"
+        value={amountUsd}
+        onChange={(e) => setAmountUsd(e.target.value)}
+        required
+      />
+      <Input
+        label="Amount in crypto (optional)"
+        type="number"
+        min="0"
+        step="any"
+        value={amountCrypto}
+        onChange={(e) => setAmountCrypto(e.target.value)}
+        hint="Native token amount, e.g. 0.05 for BTC."
+      />
+      <Input
+        label="Transaction hash"
+        value={txHash}
+        onChange={(e) => setTxHash(e.target.value)}
+        hint="Used as proof; will link to the relevant block explorer."
+        required
+      />
+      <Input
+        label="Network (optional)"
+        value={network}
+        onChange={(e) => setNetwork(e.target.value)}
+        hint="Override for multi-chain assets, e.g. TRX or SOL for USDT."
+      />
+      <Input
+        label="Note (optional)"
+        value={note}
+        onChange={(e) => setNote(e.target.value)}
+      />
+
+      <label className="flex items-center gap-2 text-sm text-zinc-300">
+        <input
+          type="checkbox"
+          checked={alsoIncrementBalance}
+          onChange={(e) => setAlsoIncrementBalance(e.target.checked)}
+        />
+        Also add this amount to the user&apos;s portfolio balance
+      </label>
+
+      {message && (
+        <p className={`text-xs ${message.kind === "ok" ? "text-green-400" : "text-red-400"}`}>
+          {message.text}
+        </p>
+      )}
+      <button type="submit" disabled={submitting} className="btn-gold w-full">
+        {submitting ? "Recording…" : "Record deposit"}
+      </button>
+    </form>
   );
 }
 
