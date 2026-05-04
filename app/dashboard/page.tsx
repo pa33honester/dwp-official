@@ -106,26 +106,14 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      <section className="mt-10 rounded-2xl border border-dashed border-border bg-surface/40 p-6 text-center sm:p-10">
-        <h2 className="text-lg font-medium text-white">
-          Deposit crypto to activate your wallet environment
-        </h2>
-        <p className="mx-auto mt-2 max-w-md text-sm text-zinc-400">
-          Choose an asset below to view your deposit address. All deposits are
-          received into your DWP-secured custody wallet.
-        </p>
-      </section>
-
-      <section className="mt-8">
-        <h3 className="mb-4 text-sm font-semibold uppercase tracking-wider text-gold">
-          Quick Deposit
-        </h3>
-        <CryptoDepositGrid />
-      </section>
-
       <section className="mt-10">
-        <h3 className="mb-4 text-sm font-semibold uppercase tracking-wider text-gold">
+        <h3 className="mb-4 flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-gold">
           Transaction History
+          {deposits.length > 0 && (
+            <span className="rounded-full bg-gold/15 px-2 py-0.5 text-[10px] font-semibold text-gold">
+              {deposits.length}
+            </span>
+          )}
         </h3>
         {deposits.length === 0 ? (
           <p className="rounded-2xl border border-dashed border-border bg-surface/40 p-6 text-center text-sm text-zinc-500">
@@ -203,6 +191,23 @@ export default function DashboardPage() {
             </table>
           </div>
         )}
+      </section>
+
+      <section className="mt-10 rounded-2xl border border-dashed border-border bg-surface/40 p-6 text-center sm:p-10">
+        <h2 className="text-lg font-medium text-white">
+          Deposit crypto to activate your wallet environment
+        </h2>
+        <p className="mx-auto mt-2 max-w-md text-sm text-zinc-400">
+          Choose an asset below to view your deposit address. All deposits are
+          received into your DWP-secured custody wallet.
+        </p>
+      </section>
+
+      <section className="mt-8">
+        <h3 className="mb-4 text-sm font-semibold uppercase tracking-wider text-gold">
+          Quick Deposit
+        </h3>
+        <CryptoDepositGrid />
       </section>
     </main>
   );
