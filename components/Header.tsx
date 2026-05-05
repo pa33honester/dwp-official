@@ -80,12 +80,13 @@ export function Header() {
           {authed === null ? null : authed ? (
             <>
               {email && (
-                <span
-                  title={email}
-                  className="hidden max-w-[160px] truncate text-xs text-zinc-400 md:inline-block"
+                <Link
+                  href="/profile"
+                  title={`${email} — open profile`}
+                  className="hidden max-w-[160px] truncate text-xs text-zinc-400 transition hover:text-gold md:inline-block"
                 >
                   {email}
-                </span>
+                </Link>
               )}
               <button
                 type="button"
@@ -143,9 +144,13 @@ export function Header() {
             {authed ? (
               <>
                 {email && (
-                  <span className="mt-2 truncate px-2 text-xs text-zinc-500">
+                  <Link
+                    href="/profile"
+                    onClick={() => setOpen(false)}
+                    className="mt-2 truncate rounded-md px-2 py-3 text-xs text-zinc-300 transition hover:bg-surface hover:text-gold"
+                  >
                     {email}
-                  </span>
+                  </Link>
                 )}
                 <button
                   type="button"

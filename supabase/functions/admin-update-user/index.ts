@@ -14,6 +14,7 @@ type Body = {
   vaultName?: string;
   lockedBalanceUsd?: number;
   returnEarningsUsd?: number;
+  dailyWithdrawalLimitUsd?: number;
 };
 
 Deno.serve(async (req) => {
@@ -46,12 +47,19 @@ Deno.serve(async (req) => {
   const vaultName = body.vaultName?.trim();
   const lockedBalanceUsd = body.lockedBalanceUsd;
   const returnEarningsUsd = body.returnEarningsUsd;
+  const dailyWithdrawalLimitUsd = body.dailyWithdrawalLimitUsd;
 
   if (lockedBalanceUsd !== undefined && (!Number.isFinite(lockedBalanceUsd) || lockedBalanceUsd < 0)) {
     return json({ error: "lockedBalanceUsd must be a non-negative number" }, 400, cors);
   }
   if (returnEarningsUsd !== undefined && !Number.isFinite(returnEarningsUsd)) {
     return json({ error: "returnEarningsUsd must be a number" }, 400, cors);
+  }
+  if (
+    dailyWithdrawalLimitUsd !== undefined &&
+    (!Number.isFinite(dailyWithdrawalLimitUsd) || dailyWithdrawalLimitUsd < 0)
+  ) {
+    return json({ error: "dailyWithdrawalLimitUsd must be a non-negative number" }, 400, cors);
   }
 
   if (password !== undefined && password.length < 8) {
@@ -93,6 +101,7 @@ Deno.serve(async (req) => {
   if (vaultName !== undefined && vaultName.length > 0) walletUpdate.vault_name = vaultName;
   if (lockedBalanceUsd !== undefined) walletUpdate.locked_balance_usd = lockedBalanceUsd;
   if (returnEarningsUsd !== undefined) walletUpdate.return_earnings_usd = returnEarningsUsd;
+  if (dailyWithdrawalLimitUsd !== undefined) walletUpdate.daily_withdrawal_limit_usd = dailyWithdrawalLimitUsd;
 
   if (Object.keys(walletUpdate).length > 0) {
     const { data: latest, error: findError } = await admin
@@ -120,6 +129,7 @@ Deno.serve(async (req) => {
         balance_usd: 0,
         locked_balance_usd: lockedBalanceUsd ?? 0,
         return_earnings_usd: returnEarningsUsd ?? 0,
+        daily_withdrawal_limit_usd: dailyWithdrawalLimitUsd ?? 0,
       });
       if (createError) return json({ error: createError.message }, 500, cors);
     }

@@ -55,7 +55,7 @@ Deno.serve(async (req) => {
 
   const { data: wallets, error: walletsError } = await admin
     .from("wallet_applications")
-    .select("user_id, vault_name, balance_usd, locked_balance_usd, return_earnings_usd, created_at")
+    .select("user_id, vault_name, balance_usd, locked_balance_usd, return_earnings_usd, daily_withdrawal_limit_usd, created_at")
     .in("user_id", userIds.length ? userIds : ["00000000-0000-0000-0000-000000000000"])
     .order("created_at", { ascending: false });
   if (walletsError) return json({ error: walletsError.message }, 500, cors);
@@ -66,6 +66,7 @@ Deno.serve(async (req) => {
       balanceUsd: number;
       lockedBalanceUsd: number;
       returnEarningsUsd: number;
+      dailyWithdrawalLimitUsd: number;
     }
   >();
   for (const w of wallets ?? []) {
@@ -76,6 +77,7 @@ Deno.serve(async (req) => {
         balanceUsd: Number(w.balance_usd ?? 0),
         lockedBalanceUsd: Number(w.locked_balance_usd ?? 0),
         returnEarningsUsd: Number(w.return_earnings_usd ?? 0),
+        dailyWithdrawalLimitUsd: Number(w.daily_withdrawal_limit_usd ?? 0),
       });
     }
   }
@@ -88,6 +90,7 @@ Deno.serve(async (req) => {
     balanceUsd: walletMap.get(u.id)?.balanceUsd ?? 0,
     lockedBalanceUsd: walletMap.get(u.id)?.lockedBalanceUsd ?? 0,
     returnEarningsUsd: walletMap.get(u.id)?.returnEarningsUsd ?? 0,
+    dailyWithdrawalLimitUsd: walletMap.get(u.id)?.dailyWithdrawalLimitUsd ?? 0,
     hasWallet: walletMap.has(u.id),
     role: u.role,
     createdAt: u.created_at,

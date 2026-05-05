@@ -16,6 +16,7 @@ type AdminUser = {
   balanceUsd: number;
   lockedBalanceUsd: number;
   returnEarningsUsd: number;
+  dailyWithdrawalLimitUsd: number;
   hasWallet: boolean;
   role: "admin" | "user" | null;
   createdAt: string;
@@ -477,6 +478,7 @@ function EditUserDialog({
   const [lockedMode, setLockedMode] = useState<"$" | "%">("$");
   const [returnRaw, setReturnRaw] = useState(String(user.returnEarningsUsd ?? 0));
   const [returnMode, setReturnMode] = useState<"$" | "%">("$");
+  const [dailyLimit, setDailyLimit] = useState(String(user.dailyWithdrawalLimitUsd ?? 0));
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -498,6 +500,7 @@ function EditUserDialog({
         vaultName?: string;
         lockedBalanceUsd?: number;
         returnEarningsUsd?: number;
+        dailyWithdrawalLimitUsd?: number;
       };
       const body: Body = { userId: user.id };
       if (fullName.trim() && fullName.trim() !== (user.fullName ?? "")) {
@@ -517,6 +520,14 @@ function EditUserDialog({
       }
       if (returnResolved !== null && returnResolved !== Number(user.returnEarningsUsd ?? 0)) {
         body.returnEarningsUsd = roundCents(returnResolved);
+      }
+      const limitNum = Number(dailyLimit);
+      if (
+        Number.isFinite(limitNum) &&
+        limitNum >= 0 &&
+        limitNum !== Number(user.dailyWithdrawalLimitUsd ?? 0)
+      ) {
+        body.dailyWithdrawalLimitUsd = roundCents(limitNum);
       }
 
       const supabase = createSupabaseBrowserClient();
@@ -605,6 +616,15 @@ function EditUserDialog({
           resolved={returnResolved}
           total={total}
           allowNegative
+        />
+        <Input
+          label="Daily withdrawal limit (USD)"
+          type="number"
+          min="0"
+          step="0.01"
+          value={dailyLimit}
+          onChange={(e) => setDailyLimit(e.target.value)}
+          hint="0 means no limit set."
         />
         {error && <p className="text-xs text-red-400">{error}</p>}
         <div className="flex justify-end gap-2 pt-2">
