@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { useAccount } from "wagmi";
@@ -226,67 +227,34 @@ export default function DashboardPage() {
               {fmtUsd(totalUsd)}
             </p>
           </div>
-          <ConnectButton.Custom>
-            {({
-              account,
-              chain,
-              openAccountModal,
-              openChainModal,
-              openConnectModal,
-              mounted,
-            }) => {
-              const ready = mounted;
-              const connected = ready && account && chain;
-              if (!ready) {
-                return (
-                  <div
-                    aria-hidden
-                    style={{ opacity: 0, pointerEvents: "none", userSelect: "none" }}
-                  />
-                );
-              }
-              if (!connected) {
-                return (
-                  <button
-                    type="button"
-                    onClick={openConnectModal}
-                    className="btn-gold text-sm"
-                  >
-                    Connect Wallet
-                  </button>
-                );
-              }
-              if (chain.unsupported) {
-                return (
-                  <button
-                    type="button"
-                    onClick={openChainModal}
-                    className="btn-outline text-xs text-red-400"
-                  >
-                    Wrong network
-                  </button>
-                );
-              }
-              return (
-                <button
-                  type="button"
-                  onClick={openAccountModal}
-                  className="rounded-md border border-border bg-elevated px-3 py-1.5 text-xs text-zinc-400 break-all hover:border-gold/40"
-                >
-                  Wallet: <span className="text-gold">{account.displayName}</span>
-                </button>
-              );
-            }}
-          </ConnectButton.Custom>
-          {availableUsd - pendingWithdrawalsUsd > 0 && (
+          <div className="flex flex-wrap items-center gap-2">
+            {availableUsd - pendingWithdrawalsUsd > 0 && (
+              <button
+                type="button"
+                onClick={() => setWithdrawOpen(true)}
+                className="btn-outline text-sm"
+              >
+                Withdraw
+              </button>
+            )}
             <button
               type="button"
-              onClick={() => setWithdrawOpen(true)}
-              className="btn-outline text-sm"
+              onClick={() =>
+                document
+                  .getElementById("quick-deposit")
+                  ?.scrollIntoView({ behavior: "smooth", block: "start" })
+              }
+              className="btn-gold text-sm"
             >
-              Withdraw
+              Deposit
             </button>
-          )}
+            <Link
+              href="/profile"
+              className="rounded-md border border-border bg-elevated px-3 py-1.5 text-sm text-zinc-300 transition hover:border-gold/40 hover:text-gold"
+            >
+              Profile
+            </Link>
+          </div>
         </div>
       </div>
 
@@ -406,11 +374,73 @@ export default function DashboardPage() {
         </section>
       )}
 
-      <section className="mt-8">
+      <section id="quick-deposit" className="mt-8 scroll-mt-20">
         <h3 className="mb-4 text-sm font-semibold uppercase tracking-wider text-gold">
           Quick Deposit
         </h3>
         <CryptoDepositGrid />
+      </section>
+
+      <section className="mt-10 rounded-2xl border border-border bg-surface p-6">
+        <h3 className="mb-1 text-sm font-semibold uppercase tracking-wider text-gold">
+          Linked Wallet
+        </h3>
+        <p className="mb-4 text-xs text-zinc-500">
+          Optional. Link an external wallet (MetaMask, Trust, Coinbase Wallet, etc.)
+          for reference. DWP custody is independent of this connection.
+        </p>
+        <ConnectButton.Custom>
+          {({
+            account,
+            chain,
+            openAccountModal,
+            openChainModal,
+            openConnectModal,
+            mounted,
+          }) => {
+            const ready = mounted;
+            const connected = ready && account && chain;
+            if (!ready) {
+              return (
+                <div
+                  aria-hidden
+                  style={{ opacity: 0, pointerEvents: "none", userSelect: "none" }}
+                />
+              );
+            }
+            if (!connected) {
+              return (
+                <button
+                  type="button"
+                  onClick={openConnectModal}
+                  className="btn-gold text-sm"
+                >
+                  Connect Wallet
+                </button>
+              );
+            }
+            if (chain.unsupported) {
+              return (
+                <button
+                  type="button"
+                  onClick={openChainModal}
+                  className="btn-outline text-xs text-red-400"
+                >
+                  Wrong network
+                </button>
+              );
+            }
+            return (
+              <button
+                type="button"
+                onClick={openAccountModal}
+                className="rounded-md border border-border bg-elevated px-3 py-1.5 text-xs text-zinc-400 break-all hover:border-gold/40"
+              >
+                Wallet: <span className="text-gold">{account.displayName}</span>
+              </button>
+            );
+          }}
+        </ConnectButton.Custom>
       </section>
 
       {withdrawOpen && userId && (
