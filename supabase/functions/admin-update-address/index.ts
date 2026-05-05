@@ -9,7 +9,10 @@ type Body = {
   name?: string;
   color?: string;
   address?: string;
+  qrImageDataUrl?: string | null;
 };
+
+const MAX_QR_BYTES = 700_000; // ~500KB binary, base64 inflates ~33%
 
 Deno.serve(async (req) => {
   const cors = corsHeaders(req.headers.get("origin"));
@@ -33,8 +36,20 @@ Deno.serve(async (req) => {
 
   const ticker = body.ticker?.trim().toUpperCase();
   if (!ticker) return json({ error: "ticker is required" }, 400, cors);
-  if (typeof body.address !== "string") {
-    return json({ error: "address is required (may be empty)" }, 400, cors);
+
+  if (
+    body.qrImageDataUrl !== undefined &&
+    body.qrImageDataUrl !== null &&
+    body.qrImageDataUrl.length > MAX_QR_BYTES
+  ) {
+    return json({ error: "QR image too large (max ~500KB)" }, 400, cors);
+  }
+  if (
+    typeof body.qrImageDataUrl === "string" &&
+    body.qrImageDataUrl.length > 0 &&
+    !body.qrImageDataUrl.startsWith("data:image/")
+  ) {
+    return json({ error: "qrImageDataUrl must be an image data URL" }, 400, cors);
   }
 
   const admin = createClient(supabaseUrl, serviceKey, {
@@ -43,11 +58,12 @@ Deno.serve(async (req) => {
 
   const row: Record<string, unknown> = {
     ticker,
-    address: body.address.trim(),
     updated_at: new Date().toISOString(),
   };
+  if (typeof body.address === "string") row.address = body.address.trim();
   if (body.name?.trim()) row.name = body.name.trim();
   if (body.color?.trim()) row.color = body.color.trim();
+  if (body.qrImageDataUrl !== undefined) row.qr_image_data_url = body.qrImageDataUrl;
 
   const { error } = await admin
     .from("deposit_addresses")

@@ -27,6 +27,7 @@ type DepositAddress = {
   name: string;
   color: string;
   address: string;
+  qr_image_data_url?: string | null;
 };
 
 const fmtUsd = (n: number) =>
@@ -1375,6 +1376,7 @@ function ApproveWithdrawalDialog({
 function AddressesTab() {
   const [rows, setRows] = useState<DepositAddress[] | null>(null);
   const [edits, setEdits] = useState<Record<string, string>>({});
+  const [qrEdits, setQrEdits] = useState<Record<string, string | null>>({});
   const [savingTicker, setSavingTicker] = useState<string | null>(null);
   const [savedTicker, setSavedTicker] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -1384,7 +1386,7 @@ function AddressesTab() {
     const supabase = createSupabaseBrowserClient();
     const { data, error: queryError } = await supabase
       .from("deposit_addresses")
-      .select("ticker, name, color, address")
+      .select("ticker, name, color, address, qr_image_data_url")
       .order("ticker");
     if (queryError) {
       setError(queryError.message);
@@ -1398,14 +1400,50 @@ function AddressesTab() {
     load();
   }, []);
 
+  async function readImageAsDataUrl(file: File): Promise<string> {
+    if (!file.type.startsWith("image/")) {
+      throw new Error("Please choose an image file.");
+    }
+    if (file.size > 500_000) {
+      throw new Error("Image is too large (max ~500KB).");
+    }
+    return await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(new Error("Failed to read file."));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function onQrFileChange(ticker: string, file: File | undefined) {
+    if (!file) return;
+    setError(null);
+    try {
+      const dataUrl = await readImageAsDataUrl(file);
+      setQrEdits((c) => ({ ...c, [ticker]: dataUrl }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to read image.");
+    }
+  }
+
   async function save(ticker: string) {
     setSavingTicker(ticker);
     setError(null);
     try {
       const supabase = createSupabaseBrowserClient();
-      const address = (edits[ticker] ?? "").trim();
+      const body: {
+        ticker: string;
+        address?: string;
+        qrImageDataUrl?: string | null;
+      } = { ticker };
+      if (edits[ticker] !== undefined) {
+        body.address = edits[ticker].trim();
+      }
+      if (qrEdits[ticker] !== undefined) {
+        body.qrImageDataUrl = qrEdits[ticker];
+      }
       const { data, error: invokeError } = await supabase.functions.invoke("admin-update-address", {
-        body: { ticker, address },
+        body,
       });
       if (invokeError) throw invokeError;
       const payload = data as { ok?: boolean; error?: string };
@@ -1413,6 +1451,11 @@ function AddressesTab() {
       setSavedTicker(ticker);
       setTimeout(() => setSavedTicker((c) => (c === ticker ? null : c)), 1500);
       setEdits((c) => {
+        const next = { ...c };
+        delete next[ticker];
+        return next;
+      });
+      setQrEdits((c) => {
         const next = { ...c };
         delete next[ticker];
         return next;
@@ -1439,58 +1482,101 @@ function AddressesTab() {
               <th className="px-4 py-3">Asset</th>
               <th className="px-4 py-3">Current address</th>
               <th className="px-4 py-3">New address</th>
+              <th className="px-4 py-3">QR image</th>
               <th className="px-4 py-3"></th>
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) => (
-              <tr key={r.ticker} className="border-t border-border">
-                <td className="px-4 py-3 align-top">
-                  <div className="flex items-center gap-2">
-                    <span
-                      className="flex h-7 w-7 items-center justify-center rounded-full text-[10px] font-semibold text-white"
-                      style={{ backgroundColor: r.color }}
-                    >
-                      {r.ticker.slice(0, 3)}
-                    </span>
-                    <div>
-                      <p className="text-white">{r.name}</p>
-                      <p className="text-xs text-zinc-500">{r.ticker}</p>
+            {rows.map((r) => {
+              const previewSrc = qrEdits[r.ticker] ?? r.qr_image_data_url ?? null;
+              const dirty = edits[r.ticker] !== undefined || qrEdits[r.ticker] !== undefined;
+              return (
+                <tr key={r.ticker} className="border-t border-border">
+                  <td className="px-4 py-3 align-top">
+                    <div className="flex items-center gap-2">
+                      <span
+                        className="flex h-7 w-7 items-center justify-center rounded-full text-[10px] font-semibold text-white"
+                        style={{ backgroundColor: r.color }}
+                      >
+                        {r.ticker.slice(0, 3)}
+                      </span>
+                      <div>
+                        <p className="text-white">{r.name}</p>
+                        <p className="text-xs text-zinc-500">{r.ticker}</p>
+                      </div>
                     </div>
-                  </div>
-                </td>
-                <td className="px-4 py-3 align-top">
-                  <span className="font-mono text-xs break-all text-zinc-300">
-                    {r.address || <span className="text-zinc-600">Not set</span>}
-                  </span>
-                </td>
-                <td className="px-4 py-3 align-top">
-                  <input
-                    type="text"
-                    placeholder={r.address || "Enter deposit address"}
-                    value={edits[r.ticker] ?? ""}
-                    onChange={(e) =>
-                      setEdits((c) => ({ ...c, [r.ticker]: e.target.value }))
-                    }
-                    className="input w-full min-w-[260px] font-mono text-xs"
-                  />
-                </td>
-                <td className="px-4 py-3 align-top">
-                  <button
-                    type="button"
-                    disabled={savingTicker === r.ticker || !edits[r.ticker]}
-                    onClick={() => save(r.ticker)}
-                    className="btn-outline text-xs"
-                  >
-                    {savingTicker === r.ticker
-                      ? "Saving…"
-                      : savedTicker === r.ticker
-                        ? "Saved"
-                        : "Save"}
-                  </button>
-                </td>
-              </tr>
-            ))}
+                  </td>
+                  <td className="px-4 py-3 align-top">
+                    <span className="font-mono text-xs break-all text-zinc-300">
+                      {r.address || <span className="text-zinc-600">Not set</span>}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 align-top">
+                    <input
+                      type="text"
+                      placeholder={r.address || "Enter deposit address"}
+                      value={edits[r.ticker] ?? ""}
+                      onChange={(e) =>
+                        setEdits((c) => ({ ...c, [r.ticker]: e.target.value }))
+                      }
+                      className="input w-full min-w-[260px] font-mono text-xs"
+                    />
+                  </td>
+                  <td className="px-4 py-3 align-top">
+                    <div className="flex items-start gap-2">
+                      <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded border border-border bg-canvas">
+                        {previewSrc ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={previewSrc}
+                            alt={`${r.ticker} QR`}
+                            className="h-full w-full object-contain"
+                          />
+                        ) : (
+                          <span className="text-[9px] text-zinc-600">No QR</span>
+                        )}
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <label className="cursor-pointer text-xs text-gold hover:underline">
+                          {previewSrc ? "Replace" : "Upload"}
+                          <input
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={(e) =>
+                              onQrFileChange(r.ticker, e.target.files?.[0])
+                            }
+                          />
+                        </label>
+                        {previewSrc && (
+                          <button
+                            type="button"
+                            onClick={() => setQrEdits((c) => ({ ...c, [r.ticker]: null }))}
+                            className="text-xs text-red-400 hover:underline"
+                          >
+                            Remove
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 align-top">
+                    <button
+                      type="button"
+                      disabled={savingTicker === r.ticker || !dirty}
+                      onClick={() => save(r.ticker)}
+                      className="btn-outline text-xs"
+                    >
+                      {savingTicker === r.ticker
+                        ? "Saving…"
+                        : savedTicker === r.ticker
+                          ? "Saved"
+                          : "Save"}
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
