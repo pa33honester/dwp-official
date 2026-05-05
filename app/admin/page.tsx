@@ -6,7 +6,7 @@ import { Input } from "@/components/forms/Field";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { getExplorerUrl, MULTI_CHAIN_ASSETS } from "@/lib/explorer-urls";
 
-type Tab = "users" | "balances" | "addresses" | "deposits" | "withdrawals";
+type Tab = "users" | "addresses" | "deposits" | "withdrawals";
 
 type AdminUser = {
   id: string;
@@ -69,9 +69,8 @@ export default function AdminPage() {
       <div className="mt-6 flex gap-2 border-b border-border">
         {(
           [
-            ["users", "Create User"],
-            ["balances", "Users"],
-            ["deposits", "Record Deposit"],
+            ["users", "Users"],
+            ["deposits", "Deposits"],
             ["withdrawals", "Withdrawals"],
             ["addresses", "Deposit Addresses"],
           ] as Array<[Tab, string]>
@@ -92,8 +91,7 @@ export default function AdminPage() {
       </div>
 
       <div className="mt-8">
-        {tab === "users" && <CreateUserTab />}
-        {tab === "balances" && <UsersTab />}
+        {tab === "users" && <UsersTab />}
         {tab === "deposits" && <DepositsTab />}
         {tab === "withdrawals" && <WithdrawalsTab />}
         {tab === "addresses" && <AddressesTab />}
@@ -102,94 +100,110 @@ export default function AdminPage() {
   );
 }
 
-function CreateUserTab() {
+function CreateUserDialog({
+  onClose,
+  onCreated,
+}: {
+  onClose: () => void;
+  onCreated: () => void | Promise<void>;
+}) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
   const [vaultName, setVaultName] = useState("Main Vault");
   const [balanceUsd, setBalanceUsd] = useState("0");
   const [submitting, setSubmitting] = useState(false);
-  const [message, setMessage] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSubmitting(true);
-    setMessage(null);
+    setError(null);
     try {
       const supabase = createSupabaseBrowserClient();
-      const { data, error } = await supabase.functions.invoke("admin-create-user", {
-        body: {
-          email,
-          password,
-          fullName,
-          vaultName: vaultName.trim() || undefined,
-          balanceUsd: Number(balanceUsd),
+      const { data, error: invokeError } = await supabase.functions.invoke(
+        "admin-create-user",
+        {
+          body: {
+            email,
+            password,
+            fullName,
+            vaultName: vaultName.trim() || undefined,
+            balanceUsd: Number(balanceUsd),
+          },
         },
-      });
-      if (error) throw error;
+      );
+      if (invokeError) throw invokeError;
       const payload = data as { ok?: boolean; error?: string; userId?: string };
       if (!payload?.ok) throw new Error(payload?.error ?? "Failed");
-      setMessage({ kind: "ok", text: `User created (${payload.userId}).` });
-      setEmail("");
-      setPassword("");
-      setFullName("");
-      setVaultName("Main Vault");
-      setBalanceUsd("0");
+      await onCreated();
     } catch (err) {
-      const text = err instanceof Error ? err.message : "Failed to create user.";
-      setMessage({ kind: "err", text });
+      setError(err instanceof Error ? err.message : "Failed to create user.");
     } finally {
       setSubmitting(false);
     }
   }
 
   return (
-    <form onSubmit={handleSubmit} className="max-w-lg space-y-4 rounded-2xl border border-border bg-surface p-6">
-      <Input
-        label="Email"
-        type="email"
-        value={email}
-        onChange={(e) => setEmail(e.target.value)}
-        required
-      />
-      <Input
-        label="Temporary password"
-        type="text"
-        value={password}
-        onChange={(e) => setPassword(e.target.value)}
-        hint="Minimum 8 characters. Share with the user securely."
-        required
-      />
-      <Input
-        label="Full name"
-        value={fullName}
-        onChange={(e) => setFullName(e.target.value)}
-        required
-      />
-      <Input
-        label="Vault name"
-        value={vaultName}
-        onChange={(e) => setVaultName(e.target.value)}
-        hint="A DWP wallet is created for every new user."
-        required
-      />
-      <Input
-        label="Initial balance (USD)"
-        type="number"
-        min="0"
-        step="0.01"
-        value={balanceUsd}
-        onChange={(e) => setBalanceUsd(e.target.value)}
-      />
-      {message && (
-        <p className={`text-xs ${message.kind === "ok" ? "text-green-400" : "text-red-400"}`}>
-          {message.text}
-        </p>
-      )}
-      <button type="submit" disabled={submitting} className="btn-gold w-full">
-        {submitting ? "Creating…" : "Create user"}
-      </button>
-    </form>
+    <div
+      role="dialog"
+      aria-modal="true"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4"
+      onClick={onClose}
+    >
+      <form
+        onSubmit={handleSubmit}
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-lg space-y-4 rounded-2xl border border-border bg-surface p-6"
+      >
+        <h3 className="font-display text-xl font-semibold text-white">Create user</h3>
+        <Input
+          label="Email"
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          required
+        />
+        <Input
+          label="Temporary password"
+          type="text"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          hint="Minimum 8 characters. Share with the user securely."
+          required
+        />
+        <Input
+          label="Full name"
+          value={fullName}
+          onChange={(e) => setFullName(e.target.value)}
+          required
+        />
+        <Input
+          label="Vault name"
+          value={vaultName}
+          onChange={(e) => setVaultName(e.target.value)}
+          hint="A DWP wallet is created for every new user."
+          required
+        />
+        <Input
+          label="Initial balance (USD)"
+          type="number"
+          min="0"
+          step="0.01"
+          value={balanceUsd}
+          onChange={(e) => setBalanceUsd(e.target.value)}
+        />
+        {error && <p className="text-xs text-red-400">{error}</p>}
+        <div className="flex justify-end gap-2 pt-2">
+          <button type="button" onClick={onClose} className="btn-outline text-xs">
+            Cancel
+          </button>
+          <button type="submit" disabled={submitting} className="btn-gold text-xs">
+            {submitting ? "Creating…" : "Create user"}
+          </button>
+        </div>
+      </form>
+    </div>
   );
 }
 
@@ -202,6 +216,7 @@ function UsersTab() {
   const [savedId, setSavedId] = useState<string | null>(null);
   const [editing, setEditing] = useState<AdminUser | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
 
   async function load() {
     setError(null);
@@ -278,9 +293,23 @@ function UsersTab() {
 
   return (
     <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-zinc-400">
+          {users.length} user{users.length === 1 ? "" : "s"}
+        </p>
+        <button
+          type="button"
+          onClick={() => setCreating(true)}
+          className="btn-gold text-xs"
+        >
+          + Create User
+        </button>
+      </div>
       {error && <p className="text-xs text-red-400">{error}</p>}
       {users.length === 0 ? (
-        <p className="text-sm text-zinc-400">No users yet. Create one in the Create User tab.</p>
+        <p className="rounded-2xl border border-dashed border-border bg-surface/40 p-6 text-center text-sm text-zinc-500">
+          No users yet. Click <span className="text-gold">+ Create User</span> to add one.
+        </p>
       ) : (
         <div className="overflow-x-auto rounded-2xl border border-border bg-surface">
           <table className="min-w-full text-sm">
@@ -378,6 +407,16 @@ function UsersTab() {
           onClose={() => setEditing(null)}
           onSaved={async () => {
             setEditing(null);
+            await load();
+          }}
+        />
+      )}
+
+      {creating && (
+        <CreateUserDialog
+          onClose={() => setCreating(false)}
+          onCreated={async () => {
+            setCreating(false);
             await load();
           }}
         />
@@ -659,16 +698,7 @@ function DepositsTab() {
   const [assets, setAssets] = useState<DepositAddress[] | null>(null);
   const [deposits, setDeposits] = useState<DepositRecord[] | null>(null);
   const [depositsError, setDepositsError] = useState<string | null>(null);
-  const [userId, setUserId] = useState("");
-  const [asset, setAsset] = useState("");
-  const [amountUsd, setAmountUsd] = useState("");
-  const [amountCrypto, setAmountCrypto] = useState("");
-  const [txHash, setTxHash] = useState("");
-  const [network, setNetwork] = useState("");
-  const [note, setNote] = useState("");
-  const [alsoIncrementBalance, setAlsoIncrementBalance] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
-  const [message, setMessage] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+  const [recording, setRecording] = useState(false);
 
   async function loadDeposits() {
     setDepositsError(null);
@@ -704,10 +734,164 @@ function DepositsTab() {
     loadDeposits();
   }, []);
 
+  if (users === null || assets === null) {
+    return <p className="text-sm text-zinc-400">Loading…</p>;
+  }
+
+  const userById = new Map(users.map((u) => [u.id, u]));
+  const assetByTicker = new Map(assets.map((a) => [a.ticker, a]));
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-zinc-400">
+          {deposits?.length ?? 0} deposit{(deposits?.length ?? 0) === 1 ? "" : "s"}
+        </p>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={loadDeposits}
+            className="text-xs text-zinc-400 hover:text-white"
+          >
+            Refresh
+          </button>
+          <button
+            type="button"
+            onClick={() => setRecording(true)}
+            className="btn-gold text-xs"
+          >
+            + Record Deposit
+          </button>
+        </div>
+      </div>
+      {depositsError && (
+        <p className="text-xs text-red-400">{depositsError}</p>
+      )}
+      {deposits === null ? (
+        <p className="text-sm text-zinc-400">Loading deposits…</p>
+      ) : deposits.length === 0 ? (
+        <p className="rounded-2xl border border-dashed border-border bg-surface/40 p-6 text-center text-sm text-zinc-500">
+          No deposits recorded yet. Click <span className="text-gold">+ Record Deposit</span> to log one.
+        </p>
+      ) : (
+        <div className="overflow-x-auto rounded-2xl border border-border bg-surface">
+          <table className="min-w-full text-sm">
+            <thead className="bg-elevated text-left text-xs uppercase tracking-wider text-zinc-400">
+              <tr>
+                <th className="px-4 py-3">Date</th>
+                <th className="px-4 py-3">User</th>
+                <th className="px-4 py-3">Asset</th>
+                <th className="px-4 py-3">Amount</th>
+                <th className="px-4 py-3">TX hash</th>
+                <th className="px-4 py-3">Note</th>
+              </tr>
+            </thead>
+            <tbody>
+              {deposits.map((d) => {
+                const u = userById.get(d.user_id);
+                const meta = assetByTicker.get(d.asset);
+                const explorer = getExplorerUrl(d.asset, d.tx_hash, d.network);
+                const shortHash =
+                  d.tx_hash.length > 14
+                    ? `${d.tx_hash.slice(0, 8)}…${d.tx_hash.slice(-6)}`
+                    : d.tx_hash;
+                return (
+                  <tr key={d.id} className="border-t border-border">
+                    <td className="px-4 py-3 align-top text-zinc-300">
+                      {new Date(d.created_at).toLocaleString()}
+                    </td>
+                    <td className="px-4 py-3 align-top">
+                      <p className="text-white">{u?.fullName ?? u?.email ?? "—"}</p>
+                      <p className="text-xs text-zinc-500">{u?.email ?? d.user_id}</p>
+                    </td>
+                    <td className="px-4 py-3 align-top">
+                      <div className="flex items-center gap-2">
+                        <span
+                          className="flex h-7 w-7 items-center justify-center rounded-full text-[10px] font-semibold text-white"
+                          style={{ backgroundColor: meta?.color ?? "#444" }}
+                        >
+                          {d.asset.slice(0, 3)}
+                        </span>
+                        <div>
+                          <p className="text-white">{meta?.name ?? d.asset}</p>
+                          <p className="text-xs text-zinc-500">{d.asset}</p>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 align-top">
+                      <p className="text-white">{fmtUsd(Number(d.amount_usd))}</p>
+                      {d.amount_crypto !== null && (
+                        <p className="text-xs text-zinc-500">
+                          {Number(d.amount_crypto)} {d.asset}
+                        </p>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 align-top font-mono text-xs">
+                      {explorer ? (
+                        <a
+                          href={explorer}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-gold hover:underline"
+                        >
+                          {shortHash} ↗
+                        </a>
+                      ) : (
+                        <span className="break-all text-zinc-300">{shortHash}</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 align-top text-zinc-300">
+                      {d.note ?? <span className="text-zinc-600">—</span>}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {recording && (
+        <RecordDepositDialog
+          users={users}
+          assets={assets}
+          onClose={() => setRecording(false)}
+          onRecorded={async () => {
+            setRecording(false);
+            await loadDeposits();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function RecordDepositDialog({
+  users,
+  assets,
+  onClose,
+  onRecorded,
+}: {
+  users: AdminUser[];
+  assets: DepositAddress[];
+  onClose: () => void;
+  onRecorded: () => void | Promise<void>;
+}) {
+  const [userId, setUserId] = useState("");
+  const [asset, setAsset] = useState("");
+  const [amountUsd, setAmountUsd] = useState("");
+  const [amountCrypto, setAmountCrypto] = useState("");
+  const [txHash, setTxHash] = useState("");
+  const [network, setNetwork] = useState("");
+  const [note, setNote] = useState("");
+  const [alsoIncrementBalance, setAlsoIncrementBalance] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSubmitting(true);
-    setMessage(null);
+    setError(null);
     try {
       const usd = Number(amountUsd);
       if (!Number.isFinite(usd) || usd <= 0) {
@@ -718,255 +902,147 @@ function DepositsTab() {
         throw new Error("Amount (crypto) must be a positive number if provided.");
       }
       const supabase = createSupabaseBrowserClient();
-      const { data, error } = await supabase.functions.invoke("admin-record-deposit", {
-        body: {
-          userId,
-          asset,
-          amountUsd: usd,
-          amountCrypto: crypto,
-          txHash: txHash.trim(),
-          network: network.trim() || null,
-          note: note.trim() || null,
-          alsoIncrementBalance,
+      const { data, error: invokeError } = await supabase.functions.invoke(
+        "admin-record-deposit",
+        {
+          body: {
+            userId,
+            asset,
+            amountUsd: usd,
+            amountCrypto: crypto,
+            txHash: txHash.trim(),
+            network: network.trim() || null,
+            note: note.trim() || null,
+            alsoIncrementBalance,
+          },
         },
-      });
-      if (error) throw error;
+      );
+      if (invokeError) throw invokeError;
       const payload = data as { ok?: boolean; error?: string; depositId?: string };
       if (!payload?.ok) throw new Error(payload?.error ?? "Failed");
-      setMessage({ kind: "ok", text: `Deposit recorded (${payload.depositId}).` });
-      setAmountUsd("");
-      setAmountCrypto("");
-      setTxHash("");
-      setNetwork("");
-      setNote("");
-      await loadDeposits();
+      await onRecorded();
     } catch (err) {
-      const text = err instanceof Error ? err.message : "Failed to record deposit.";
-      setMessage({ kind: "err", text });
+      setError(err instanceof Error ? err.message : "Failed to record deposit.");
     } finally {
       setSubmitting(false);
     }
   }
 
-  if (users === null || assets === null) {
-    return <p className="text-sm text-zinc-400">Loading…</p>;
-  }
-
-  const userById = new Map(users.map((u) => [u.id, u]));
-  const assetByTicker = new Map(assets.map((a) => [a.ticker, a]));
-
   return (
-    <div className="space-y-8">
+    <div
+      role="dialog"
+      aria-modal="true"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4"
+      onClick={onClose}
+    >
       <form
         onSubmit={handleSubmit}
-        className="max-w-lg space-y-4 rounded-2xl border border-border bg-surface p-6"
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-lg space-y-4 rounded-2xl border border-border bg-surface p-6"
       >
-      <label className="block text-xs uppercase tracking-wider text-zinc-400">
-        User
-        <select
-          required
-          value={userId}
-          onChange={(e) => setUserId(e.target.value)}
-          className="input mt-1 w-full"
-        >
-          <option value="">Select a user…</option>
-          {users.map((u) => (
-            <option key={u.id} value={u.id}>
-              {(u.fullName ?? u.email) ?? u.id} {u.email ? `(${u.email})` : ""}
-            </option>
-          ))}
-        </select>
-      </label>
-
-      <label className="block text-xs uppercase tracking-wider text-zinc-400">
-        Asset
-        <select
-          required
-          value={asset}
-          onChange={(e) => {
-            const next = e.target.value;
-            setAsset(next);
-            const opts = MULTI_CHAIN_ASSETS[next];
-            setNetwork(opts ? opts[0].value : "");
-          }}
-          className="input mt-1 w-full"
-        >
-          <option value="">Select an asset…</option>
-          {assets.map((a) => (
-            <option key={a.ticker} value={a.ticker}>
-              {a.name} ({a.ticker})
-            </option>
-          ))}
-        </select>
-      </label>
-
-      <Input
-        label="Amount (USD)"
-        type="number"
-        min="0"
-        step="0.01"
-        value={amountUsd}
-        onChange={(e) => setAmountUsd(e.target.value)}
-        required
-      />
-      <Input
-        label="Amount in crypto (optional)"
-        type="number"
-        min="0"
-        step="any"
-        value={amountCrypto}
-        onChange={(e) => setAmountCrypto(e.target.value)}
-        hint="Native token amount, e.g. 0.05 for BTC."
-      />
-      <Input
-        label="Transaction hash"
-        value={txHash}
-        onChange={(e) => setTxHash(e.target.value)}
-        hint="Used as proof; will link to the relevant block explorer."
-        required
-      />
-      {MULTI_CHAIN_ASSETS[asset] && (
+        <h3 className="font-display text-xl font-semibold text-white">Record deposit</h3>
         <label className="block text-xs uppercase tracking-wider text-zinc-400">
-          Network
+          User
           <select
             required
-            value={network}
-            onChange={(e) => setNetwork(e.target.value)}
+            value={userId}
+            onChange={(e) => setUserId(e.target.value)}
             className="input mt-1 w-full"
           >
-            {MULTI_CHAIN_ASSETS[asset].map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
+            <option value="">Select a user…</option>
+            {users.map((u) => (
+              <option key={u.id} value={u.id}>
+                {(u.fullName ?? u.email) ?? u.id} {u.email ? `(${u.email})` : ""}
               </option>
             ))}
           </select>
         </label>
-      )}
-      <Input
-        label="Note (optional)"
-        value={note}
-        onChange={(e) => setNote(e.target.value)}
-      />
-
-      <label className="flex items-center gap-2 text-sm text-zinc-300">
-        <input
-          type="checkbox"
-          checked={alsoIncrementBalance}
-          onChange={(e) => setAlsoIncrementBalance(e.target.checked)}
-        />
-        Also add this amount to the user&apos;s portfolio balance
-      </label>
-
-      {message && (
-        <p className={`text-xs ${message.kind === "ok" ? "text-green-400" : "text-red-400"}`}>
-          {message.text}
-        </p>
-      )}
-      <button type="submit" disabled={submitting} className="btn-gold w-full">
-        {submitting ? "Recording…" : "Record deposit"}
-      </button>
-      </form>
-
-      <div>
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-zinc-300">
-            Recent deposits
-          </h2>
-          <button
-            type="button"
-            onClick={loadDeposits}
-            className="text-xs text-zinc-400 hover:text-white"
+        <label className="block text-xs uppercase tracking-wider text-zinc-400">
+          Asset
+          <select
+            required
+            value={asset}
+            onChange={(e) => {
+              const next = e.target.value;
+              setAsset(next);
+              const opts = MULTI_CHAIN_ASSETS[next];
+              setNetwork(opts ? opts[0].value : "");
+            }}
+            className="input mt-1 w-full"
           >
-            Refresh
+            <option value="">Select an asset…</option>
+            {assets.map((a) => (
+              <option key={a.ticker} value={a.ticker}>
+                {a.name} ({a.ticker})
+              </option>
+            ))}
+          </select>
+        </label>
+        <Input
+          label="Amount (USD)"
+          type="number"
+          min="0"
+          step="0.01"
+          value={amountUsd}
+          onChange={(e) => setAmountUsd(e.target.value)}
+          required
+        />
+        <Input
+          label="Amount in crypto (optional)"
+          type="number"
+          min="0"
+          step="any"
+          value={amountCrypto}
+          onChange={(e) => setAmountCrypto(e.target.value)}
+          hint="Native token amount, e.g. 0.05 for BTC."
+        />
+        <Input
+          label="Transaction hash"
+          value={txHash}
+          onChange={(e) => setTxHash(e.target.value)}
+          hint="Used as proof; will link to the relevant block explorer."
+          required
+        />
+        {MULTI_CHAIN_ASSETS[asset] && (
+          <label className="block text-xs uppercase tracking-wider text-zinc-400">
+            Network
+            <select
+              required
+              value={network}
+              onChange={(e) => setNetwork(e.target.value)}
+              className="input mt-1 w-full"
+            >
+              {MULTI_CHAIN_ASSETS[asset].map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        <Input
+          label="Note (optional)"
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+        />
+        <label className="flex items-center gap-2 text-sm text-zinc-300">
+          <input
+            type="checkbox"
+            checked={alsoIncrementBalance}
+            onChange={(e) => setAlsoIncrementBalance(e.target.checked)}
+          />
+          Also add this amount to the user&apos;s portfolio balance
+        </label>
+        {error && <p className="text-xs text-red-400">{error}</p>}
+        <div className="flex justify-end gap-2 pt-2">
+          <button type="button" onClick={onClose} className="btn-outline text-xs">
+            Cancel
+          </button>
+          <button type="submit" disabled={submitting} className="btn-gold text-xs">
+            {submitting ? "Recording…" : "Record deposit"}
           </button>
         </div>
-        {depositsError && (
-          <p className="mb-2 text-xs text-red-400">{depositsError}</p>
-        )}
-        {deposits === null ? (
-          <p className="text-sm text-zinc-400">Loading deposits…</p>
-        ) : deposits.length === 0 ? (
-          <p className="rounded-2xl border border-dashed border-border bg-surface/40 p-6 text-center text-sm text-zinc-500">
-            No deposits recorded yet.
-          </p>
-        ) : (
-          <div className="overflow-x-auto rounded-2xl border border-border bg-surface">
-            <table className="min-w-full text-sm">
-              <thead className="bg-elevated text-left text-xs uppercase tracking-wider text-zinc-400">
-                <tr>
-                  <th className="px-4 py-3">Date</th>
-                  <th className="px-4 py-3">User</th>
-                  <th className="px-4 py-3">Asset</th>
-                  <th className="px-4 py-3">Amount</th>
-                  <th className="px-4 py-3">TX hash</th>
-                  <th className="px-4 py-3">Note</th>
-                </tr>
-              </thead>
-              <tbody>
-                {deposits.map((d) => {
-                  const u = userById.get(d.user_id);
-                  const meta = assetByTicker.get(d.asset);
-                  const explorer = getExplorerUrl(d.asset, d.tx_hash, d.network);
-                  const shortHash =
-                    d.tx_hash.length > 14
-                      ? `${d.tx_hash.slice(0, 8)}…${d.tx_hash.slice(-6)}`
-                      : d.tx_hash;
-                  return (
-                    <tr key={d.id} className="border-t border-border">
-                      <td className="px-4 py-3 align-top text-zinc-300">
-                        {new Date(d.created_at).toLocaleString()}
-                      </td>
-                      <td className="px-4 py-3 align-top">
-                        <p className="text-white">{u?.fullName ?? u?.email ?? "—"}</p>
-                        <p className="text-xs text-zinc-500">{u?.email ?? d.user_id}</p>
-                      </td>
-                      <td className="px-4 py-3 align-top">
-                        <div className="flex items-center gap-2">
-                          <span
-                            className="flex h-7 w-7 items-center justify-center rounded-full text-[10px] font-semibold text-white"
-                            style={{ backgroundColor: meta?.color ?? "#444" }}
-                          >
-                            {d.asset.slice(0, 3)}
-                          </span>
-                          <div>
-                            <p className="text-white">{meta?.name ?? d.asset}</p>
-                            <p className="text-xs text-zinc-500">{d.asset}</p>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 align-top">
-                        <p className="text-white">{fmtUsd(Number(d.amount_usd))}</p>
-                        {d.amount_crypto !== null && (
-                          <p className="text-xs text-zinc-500">
-                            {Number(d.amount_crypto)} {d.asset}
-                          </p>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 align-top font-mono text-xs">
-                        {explorer ? (
-                          <a
-                            href={explorer}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-gold hover:underline"
-                          >
-                            {shortHash} ↗
-                          </a>
-                        ) : (
-                          <span className="break-all text-zinc-300">{shortHash}</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 align-top text-zinc-300">
-                        {d.note ?? <span className="text-zinc-600">—</span>}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+      </form>
     </div>
   );
 }
