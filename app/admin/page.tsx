@@ -6,7 +6,7 @@ import { Input } from "@/components/forms/Field";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { getExplorerUrl, MULTI_CHAIN_ASSETS } from "@/lib/explorer-urls";
 
-type Tab = "users" | "balances" | "addresses" | "deposits";
+type Tab = "users" | "balances" | "addresses" | "deposits" | "withdrawals";
 
 type AdminUser = {
   id: string;
@@ -72,6 +72,7 @@ export default function AdminPage() {
             ["users", "Create User"],
             ["balances", "Users"],
             ["deposits", "Record Deposit"],
+            ["withdrawals", "Withdrawals"],
             ["addresses", "Deposit Addresses"],
           ] as Array<[Tab, string]>
         ).map(([key, label]) => (
@@ -94,6 +95,7 @@ export default function AdminPage() {
         {tab === "users" && <CreateUserTab />}
         {tab === "balances" && <UsersTab />}
         {tab === "deposits" && <DepositsTab />}
+        {tab === "withdrawals" && <WithdrawalsTab />}
         {tab === "addresses" && <AddressesTab />}
       </div>
     </main>
@@ -965,6 +967,331 @@ function DepositsTab() {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+type WithdrawalRecord = {
+  id: string;
+  user_id: string;
+  asset: string;
+  amount_usd: number | string;
+  amount_crypto: number | string | null;
+  destination_address: string;
+  network: string | null;
+  note: string | null;
+  status: "pending" | "completed" | "rejected";
+  tx_hash: string | null;
+  admin_note: string | null;
+  created_at: string;
+};
+
+function WithdrawalsTab() {
+  const [users, setUsers] = useState<AdminUser[] | null>(null);
+  const [withdrawals, setWithdrawals] = useState<WithdrawalRecord[] | null>(null);
+  const [filter, setFilter] = useState<"pending" | "all">("pending");
+  const [actingId, setActingId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [approveFor, setApproveFor] = useState<WithdrawalRecord | null>(null);
+
+  async function load() {
+    setError(null);
+    const supabase = createSupabaseBrowserClient();
+    const [usersRes, withdrawalsRes] = await Promise.all([
+      supabase.functions.invoke("admin-list-users", { body: {} }),
+      supabase
+        .from("user_withdrawals")
+        .select(
+          "id, user_id, asset, amount_usd, amount_crypto, destination_address, network, note, status, tx_hash, admin_note, created_at",
+        )
+        .order("created_at", { ascending: false })
+        .limit(100),
+    ]);
+    if (usersRes.error) setError(usersRes.error.message);
+    setUsers(((usersRes.data as { users?: AdminUser[] })?.users) ?? []);
+    if (withdrawalsRes.error) setError(withdrawalsRes.error.message);
+    setWithdrawals((withdrawalsRes.data as WithdrawalRecord[] | null) ?? []);
+  }
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  async function reject(w: WithdrawalRecord) {
+    const reason =
+      window.prompt(`Reject withdrawal ${fmtUsd(Number(w.amount_usd))}? Optional note:`, "") ?? null;
+    if (reason === null) return;
+    setActingId(w.id);
+    setError(null);
+    try {
+      const supabase = createSupabaseBrowserClient();
+      const { data, error: invokeError } = await supabase.functions.invoke(
+        "admin-reject-withdrawal",
+        { body: { withdrawalId: w.id, adminNote: reason || null } },
+      );
+      if (invokeError) throw invokeError;
+      const payload = data as { ok?: boolean; error?: string };
+      if (!payload?.ok) throw new Error(payload?.error ?? "Failed");
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to reject withdrawal.");
+    } finally {
+      setActingId(null);
+    }
+  }
+
+  if (users === null || withdrawals === null) {
+    return <p className="text-sm text-zinc-400">Loading…</p>;
+  }
+
+  const userById = new Map(users.map((u) => [u.id, u]));
+  const visible = filter === "pending"
+    ? withdrawals.filter((w) => w.status === "pending")
+    : withdrawals;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-3">
+        <div className="inline-flex overflow-hidden rounded-md border border-border">
+          {(["pending", "all"] as const).map((f) => (
+            <button
+              key={f}
+              type="button"
+              onClick={() => setFilter(f)}
+              className={`px-3 py-1.5 text-xs ${
+                filter === f ? "bg-gold text-zinc-900" : "bg-elevated text-zinc-400"
+              }`}
+            >
+              {f === "pending" ? "Pending" : "All"}
+            </button>
+          ))}
+        </div>
+        <button type="button" onClick={load} className="text-xs text-zinc-400 hover:text-white">
+          Refresh
+        </button>
+      </div>
+      {error && <p className="text-xs text-red-400">{error}</p>}
+      {visible.length === 0 ? (
+        <p className="rounded-2xl border border-dashed border-border bg-surface/40 p-6 text-center text-sm text-zinc-500">
+          No withdrawals.
+        </p>
+      ) : (
+        <div className="overflow-x-auto rounded-2xl border border-border bg-surface">
+          <table className="min-w-full text-sm">
+            <thead className="bg-elevated text-left text-xs uppercase tracking-wider text-zinc-400">
+              <tr>
+                <th className="px-4 py-3">Date</th>
+                <th className="px-4 py-3">User</th>
+                <th className="px-4 py-3">Asset</th>
+                <th className="px-4 py-3">Amount</th>
+                <th className="px-4 py-3">Destination</th>
+                <th className="px-4 py-3">Status</th>
+                <th className="px-4 py-3">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {visible.map((w) => {
+                const u = userById.get(w.user_id);
+                const explorer = w.tx_hash
+                  ? getExplorerUrl(w.asset, w.tx_hash, w.network)
+                  : null;
+                const shortDest =
+                  w.destination_address.length > 14
+                    ? `${w.destination_address.slice(0, 8)}…${w.destination_address.slice(-6)}`
+                    : w.destination_address;
+                const statusPill =
+                  w.status === "pending"
+                    ? "bg-yellow-500/10 text-yellow-400"
+                    : w.status === "completed"
+                      ? "bg-green-500/10 text-green-400"
+                      : "bg-red-500/10 text-red-400";
+                return (
+                  <tr key={w.id} className="border-t border-border">
+                    <td className="px-4 py-3 align-top text-zinc-300">
+                      {new Date(w.created_at).toLocaleString()}
+                    </td>
+                    <td className="px-4 py-3 align-top">
+                      <p className="text-white">{u?.fullName ?? u?.email ?? "—"}</p>
+                      <p className="text-xs text-zinc-500">{u?.email ?? w.user_id}</p>
+                    </td>
+                    <td className="px-4 py-3 align-top text-zinc-300">{w.asset}</td>
+                    <td className="px-4 py-3 align-top">
+                      <p className="text-white">{fmtUsd(Number(w.amount_usd))}</p>
+                      {w.amount_crypto !== null && (
+                        <p className="text-xs text-zinc-500">
+                          {Number(w.amount_crypto)} {w.asset}
+                        </p>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 align-top font-mono text-xs">
+                      <span className="break-all text-zinc-300" title={w.destination_address}>
+                        {shortDest}
+                      </span>
+                      {w.network && (
+                        <p className="font-sans text-[10px] text-zinc-500">on {w.network}</p>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 align-top">
+                      <div className="flex flex-col gap-1">
+                        <span
+                          className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-semibold ${statusPill}`}
+                        >
+                          {w.status[0].toUpperCase() + w.status.slice(1)}
+                        </span>
+                        {w.tx_hash && (
+                          <span className="font-mono text-[10px]">
+                            {explorer ? (
+                              <a
+                                href={explorer}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-gold hover:underline"
+                              >
+                                tx ↗
+                              </a>
+                            ) : (
+                              <span className="text-zinc-400">tx logged</span>
+                            )}
+                          </span>
+                        )}
+                        {w.admin_note && (
+                          <span className="font-sans text-[10px] text-zinc-500">
+                            “{w.admin_note}”
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 align-top">
+                      {w.status === "pending" ? (
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setApproveFor(w)}
+                            disabled={actingId === w.id}
+                            className="btn-outline text-xs"
+                          >
+                            Approve
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => reject(w)}
+                            disabled={actingId === w.id}
+                            className="text-xs text-red-400 hover:text-red-300 disabled:text-zinc-600"
+                          >
+                            {actingId === w.id ? "…" : "Reject"}
+                          </button>
+                        </div>
+                      ) : (
+                        <span className="text-xs text-zinc-600">—</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {approveFor && (
+        <ApproveWithdrawalDialog
+          withdrawal={approveFor}
+          onClose={() => setApproveFor(null)}
+          onApproved={async () => {
+            setApproveFor(null);
+            await load();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function ApproveWithdrawalDialog({
+  withdrawal,
+  onClose,
+  onApproved,
+}: {
+  withdrawal: WithdrawalRecord;
+  onClose: () => void;
+  onApproved: () => void | Promise<void>;
+}) {
+  const [txHash, setTxHash] = useState("");
+  const [adminNote, setAdminNote] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setSubmitting(true);
+    setError(null);
+    try {
+      if (!txHash.trim()) throw new Error("Transaction hash is required.");
+      const supabase = createSupabaseBrowserClient();
+      const { data, error: invokeError } = await supabase.functions.invoke(
+        "admin-approve-withdrawal",
+        {
+          body: {
+            withdrawalId: withdrawal.id,
+            txHash: txHash.trim(),
+            adminNote: adminNote.trim() || null,
+          },
+        },
+      );
+      if (invokeError) throw invokeError;
+      const payload = data as { ok?: boolean; error?: string };
+      if (!payload?.ok) throw new Error(payload?.error ?? "Failed");
+      await onApproved();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to approve withdrawal.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4"
+      onClick={onClose}
+    >
+      <form
+        onSubmit={handleSubmit}
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-lg space-y-4 rounded-2xl border border-border bg-surface p-6"
+      >
+        <div>
+          <h3 className="font-display text-xl font-semibold text-white">
+            Approve withdrawal
+          </h3>
+          <p className="mt-1 text-xs text-zinc-500">
+            Sending {fmtUsd(Number(withdrawal.amount_usd))} of {withdrawal.asset} to{" "}
+            <span className="font-mono break-all">{withdrawal.destination_address}</span>.
+          </p>
+        </div>
+        <Input
+          label="Transaction hash"
+          value={txHash}
+          onChange={(e) => setTxHash(e.target.value)}
+          hint="Paste the on-chain tx hash after sending. The user will see this as proof."
+          required
+        />
+        <Input
+          label="Note (optional)"
+          value={adminNote}
+          onChange={(e) => setAdminNote(e.target.value)}
+        />
+        {error && <p className="text-xs text-red-400">{error}</p>}
+        <div className="flex justify-end gap-2 pt-2">
+          <button type="button" onClick={onClose} className="btn-outline text-xs">
+            Cancel
+          </button>
+          <button type="submit" disabled={submitting} className="btn-gold text-xs">
+            {submitting ? "Approving…" : "Mark completed"}
+          </button>
+        </div>
+      </form>
     </div>
   );
 }

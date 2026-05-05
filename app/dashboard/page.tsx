@@ -6,7 +6,8 @@ import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { useAccount } from "wagmi";
 import { CryptoDepositGrid } from "@/components/CryptoDepositGrid";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
-import { getExplorerUrl } from "@/lib/explorer-urls";
+import { getExplorerUrl, MULTI_CHAIN_ASSETS } from "@/lib/explorer-urls";
+import { Input } from "@/components/forms/Field";
 
 type WalletApplication = {
   vault_name: string | null;
@@ -14,6 +15,7 @@ type WalletApplication = {
   balance_usd: number | string | null;
   locked_balance_usd: number | string | null;
   return_earnings_usd: number | string | null;
+  daily_withdrawal_limit_usd: number | string | null;
 };
 
 const fmtUsd = (n: number) =>
@@ -30,6 +32,24 @@ type DepositRow = {
   created_at: string;
 };
 
+type WithdrawalRow = {
+  id: string;
+  asset: string;
+  amount_usd: number | string;
+  amount_crypto: number | string | null;
+  destination_address: string;
+  network: string | null;
+  note: string | null;
+  status: "pending" | "completed" | "rejected";
+  tx_hash: string | null;
+  admin_note: string | null;
+  created_at: string;
+};
+
+type LedgerEntry =
+  | { kind: "deposit"; row: DepositRow; t: number }
+  | { kind: "withdrawal"; row: WithdrawalRow; t: number };
+
 type AssetMeta = { ticker: string; name: string; color: string };
 
 export default function DashboardPage() {
@@ -37,8 +57,11 @@ export default function DashboardPage() {
   const [ready, setReady] = useState(false);
   const [wallet, setWallet] = useState<WalletApplication | null>(null);
   const [deposits, setDeposits] = useState<DepositRow[]>([]);
+  const [withdrawals, setWithdrawals] = useState<WithdrawalRow[]>([]);
+  const [assets, setAssets] = useState<AssetMeta[]>([]);
   const [assetMeta, setAssetMeta] = useState<Record<string, AssetMeta>>({});
   const [userId, setUserId] = useState<string | null>(null);
+  const [withdrawOpen, setWithdrawOpen] = useState(false);
   const { address, connector, isConnected } = useAccount();
 
   useEffect(() => {
@@ -50,32 +73,48 @@ export default function DashboardPage() {
       }
       const uid = data.session.user.id;
       setUserId(uid);
-      const [walletRes, depositsRes, assetsRes] = await Promise.all([
-        supabase
-          .from("wallet_applications")
-          .select("vault_name, connected_address, balance_usd, locked_balance_usd, return_earnings_usd")
-          .eq("user_id", uid)
-          .order("created_at", { ascending: false })
-          .limit(1)
-          .maybeSingle(),
-        supabase
-          .from("user_deposits")
-          .select("id, asset, amount_usd, amount_crypto, tx_hash, network, note, created_at")
-          .eq("user_id", uid)
-          .order("created_at", { ascending: false })
-          .limit(25),
-        supabase.from("deposit_addresses").select("ticker, name, color"),
-      ]);
-      setWallet(walletRes.data as WalletApplication | null);
-      setDeposits((depositsRes.data as DepositRow[] | null) ?? []);
-      const meta: Record<string, AssetMeta> = {};
-      for (const a of (assetsRes.data as AssetMeta[] | null) ?? []) {
-        meta[a.ticker] = a;
-      }
-      setAssetMeta(meta);
+      await reloadAll(uid);
       setReady(true);
     });
   }, [router]);
+
+  async function reloadAll(uid: string) {
+    const supabase = createSupabaseBrowserClient();
+    const [walletRes, depositsRes, withdrawalsRes, assetsRes] = await Promise.all([
+      supabase
+        .from("wallet_applications")
+        .select(
+          "vault_name, connected_address, balance_usd, locked_balance_usd, return_earnings_usd, daily_withdrawal_limit_usd",
+        )
+        .eq("user_id", uid)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+      supabase
+        .from("user_deposits")
+        .select("id, asset, amount_usd, amount_crypto, tx_hash, network, note, created_at")
+        .eq("user_id", uid)
+        .order("created_at", { ascending: false })
+        .limit(50),
+      supabase
+        .from("user_withdrawals")
+        .select(
+          "id, asset, amount_usd, amount_crypto, destination_address, network, note, status, tx_hash, admin_note, created_at",
+        )
+        .eq("user_id", uid)
+        .order("created_at", { ascending: false })
+        .limit(50),
+      supabase.from("deposit_addresses").select("ticker, name, color"),
+    ]);
+    setWallet(walletRes.data as WalletApplication | null);
+    setDeposits((depositsRes.data as DepositRow[] | null) ?? []);
+    setWithdrawals((withdrawalsRes.data as WithdrawalRow[] | null) ?? []);
+    const list = (assetsRes.data as AssetMeta[] | null) ?? [];
+    setAssets(list);
+    const meta: Record<string, AssetMeta> = {};
+    for (const a of list) meta[a.ticker] = a;
+    setAssetMeta(meta);
+  }
 
   useEffect(() => {
     if (!userId) return;
@@ -124,8 +163,25 @@ export default function DashboardPage() {
   const totalUsd = Number(wallet?.balance_usd ?? 0);
   const lockedUsd = Number(wallet?.locked_balance_usd ?? 0);
   const returnUsd = Number(wallet?.return_earnings_usd ?? 0);
+  const dailyLimitUsd = Number(wallet?.daily_withdrawal_limit_usd ?? 0);
+  const pendingWithdrawalsUsd = withdrawals
+    .filter((w) => w.status === "pending")
+    .reduce((acc, w) => acc + Number(w.amount_usd ?? 0), 0);
   const availableUsd = Math.max(0, totalUsd - lockedUsd);
-  const activated = totalUsd > 0 || deposits.length > 0;
+  const activated = totalUsd > 0 || deposits.length > 0 || withdrawals.length > 0;
+
+  const ledger: LedgerEntry[] = [
+    ...deposits.map<LedgerEntry>((d) => ({
+      kind: "deposit",
+      row: d,
+      t: new Date(d.created_at).getTime(),
+    })),
+    ...withdrawals.map<LedgerEntry>((w) => ({
+      kind: "withdrawal",
+      row: w,
+      t: new Date(w.created_at).getTime(),
+    })),
+  ].sort((a, b) => b.t - a.t);
 
   const allocation = (() => {
     const totals = new Map<string, number>();
@@ -222,6 +278,15 @@ export default function DashboardPage() {
               );
             }}
           </ConnectButton.Custom>
+          {availableUsd - pendingWithdrawalsUsd > 0 && (
+            <button
+              type="button"
+              onClick={() => setWithdrawOpen(true)}
+              className="btn-outline text-sm"
+            >
+              Withdraw
+            </button>
+          )}
         </div>
       </div>
 
@@ -293,15 +358,15 @@ export default function DashboardPage() {
       <section className="mt-10">
         <h3 className="mb-4 flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-gold">
           Transaction History
-          {deposits.length > 0 && (
+          {ledger.length > 0 && (
             <span className="rounded-full bg-gold/15 px-2 py-0.5 text-[10px] font-semibold text-gold">
-              {deposits.length}
+              {ledger.length}
             </span>
           )}
         </h3>
-        {deposits.length === 0 ? (
+        {ledger.length === 0 ? (
           <p className="rounded-2xl border border-dashed border-border bg-surface/40 p-6 text-center text-sm text-zinc-500">
-            No deposits yet.
+            No transactions yet.
           </p>
         ) : (
           <div className="overflow-x-auto rounded-2xl border border-border bg-surface">
@@ -309,68 +374,20 @@ export default function DashboardPage() {
               <thead className="bg-elevated text-left text-xs uppercase tracking-wider text-zinc-400">
                 <tr>
                   <th className="px-4 py-3">Date</th>
+                  <th className="px-4 py-3">Type</th>
                   <th className="px-4 py-3">Asset</th>
                   <th className="px-4 py-3">Amount</th>
-                  <th className="px-4 py-3">Proof</th>
+                  <th className="px-4 py-3">Details</th>
                 </tr>
               </thead>
               <tbody>
-                {deposits.map((d) => {
-                  const meta = assetMeta[d.asset];
-                  const explorer = getExplorerUrl(d.asset, d.tx_hash, d.network);
-                  const shortHash =
-                    d.tx_hash.length > 14
-                      ? `${d.tx_hash.slice(0, 8)}…${d.tx_hash.slice(-6)}`
-                      : d.tx_hash;
-                  return (
-                    <tr key={d.id} className="border-t border-border">
-                      <td className="px-4 py-3 align-top text-zinc-300">
-                        {new Date(d.created_at).toLocaleString()}
-                      </td>
-                      <td className="px-4 py-3 align-top">
-                        <div className="flex items-center gap-2">
-                          <span
-                            className="flex h-7 w-7 items-center justify-center rounded-full text-[10px] font-semibold text-white"
-                            style={{ backgroundColor: meta?.color ?? "#444" }}
-                          >
-                            {d.asset.slice(0, 3)}
-                          </span>
-                          <div>
-                            <p className="text-white">{meta?.name ?? d.asset}</p>
-                            <p className="text-xs text-zinc-500">{d.asset}</p>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 align-top">
-                        <p className="text-white">
-                          {new Intl.NumberFormat("en-US", {
-                            style: "currency",
-                            currency: "USD",
-                          }).format(Number(d.amount_usd))}
-                        </p>
-                        {d.amount_crypto !== null && (
-                          <p className="text-xs text-zinc-500">
-                            {Number(d.amount_crypto)} {d.asset}
-                          </p>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 align-top font-mono text-xs">
-                        {explorer ? (
-                          <a
-                            href={explorer}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-gold hover:underline"
-                          >
-                            {shortHash} ↗
-                          </a>
-                        ) : (
-                          <span className="break-all text-zinc-300">{shortHash}</span>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
+                {ledger.map((entry) => (
+                  <LedgerRow
+                    key={`${entry.kind}-${entry.row.id}`}
+                    entry={entry}
+                    assetMeta={assetMeta}
+                  />
+                ))}
               </tbody>
             </table>
           </div>
@@ -395,7 +412,326 @@ export default function DashboardPage() {
         </h3>
         <CryptoDepositGrid />
       </section>
+
+      {withdrawOpen && userId && (
+        <WithdrawDialog
+          assets={assets}
+          available={Math.max(0, availableUsd - pendingWithdrawalsUsd)}
+          dailyLimit={dailyLimitUsd}
+          onClose={() => setWithdrawOpen(false)}
+          onSubmitted={async () => {
+            setWithdrawOpen(false);
+            await reloadAll(userId);
+          }}
+        />
+      )}
     </main>
+  );
+}
+
+function LedgerRow({
+  entry,
+  assetMeta,
+}: {
+  entry: LedgerEntry;
+  assetMeta: Record<string, AssetMeta>;
+}) {
+  const asset = entry.row.asset;
+  const meta = assetMeta[asset];
+  const amount = Number(entry.row.amount_usd);
+  const date = new Date(entry.row.created_at).toLocaleString();
+
+  if (entry.kind === "deposit") {
+    const d = entry.row;
+    const explorer = getExplorerUrl(d.asset, d.tx_hash, d.network);
+    const shortHash =
+      d.tx_hash.length > 14 ? `${d.tx_hash.slice(0, 8)}…${d.tx_hash.slice(-6)}` : d.tx_hash;
+    return (
+      <tr className="border-t border-border">
+        <td className="px-4 py-3 align-top text-zinc-300">{date}</td>
+        <td className="px-4 py-3 align-top">
+          <span className="rounded-full bg-green-500/10 px-2 py-0.5 text-[10px] font-semibold text-green-400">
+            ↓ Deposit
+          </span>
+        </td>
+        <td className="px-4 py-3 align-top">
+          <AssetCell asset={asset} meta={meta} />
+        </td>
+        <td className="px-4 py-3 align-top">
+          <p className="text-white">{fmtUsd(amount)}</p>
+          {d.amount_crypto !== null && (
+            <p className="text-xs text-zinc-500">
+              {Number(d.amount_crypto)} {asset}
+            </p>
+          )}
+        </td>
+        <td className="px-4 py-3 align-top font-mono text-xs">
+          {explorer ? (
+            <a
+              href={explorer}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-gold hover:underline"
+            >
+              {shortHash} ↗
+            </a>
+          ) : (
+            <span className="break-all text-zinc-300">{shortHash}</span>
+          )}
+        </td>
+      </tr>
+    );
+  }
+
+  const w = entry.row;
+  const explorer = w.tx_hash ? getExplorerUrl(w.asset, w.tx_hash, w.network) : null;
+  const shortHash =
+    w.tx_hash && w.tx_hash.length > 14
+      ? `${w.tx_hash.slice(0, 8)}…${w.tx_hash.slice(-6)}`
+      : w.tx_hash;
+  const shortDest =
+    w.destination_address.length > 14
+      ? `${w.destination_address.slice(0, 8)}…${w.destination_address.slice(-6)}`
+      : w.destination_address;
+  const statusPill =
+    w.status === "pending"
+      ? "bg-yellow-500/10 text-yellow-400"
+      : w.status === "completed"
+        ? "bg-green-500/10 text-green-400"
+        : "bg-red-500/10 text-red-400";
+  return (
+    <tr className="border-t border-border">
+      <td className="px-4 py-3 align-top text-zinc-300">{date}</td>
+      <td className="px-4 py-3 align-top">
+        <div className="flex flex-col gap-1">
+          <span className="rounded-full bg-orange-500/10 px-2 py-0.5 text-[10px] font-semibold text-orange-400">
+            ↑ Withdrawal
+          </span>
+          <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${statusPill}`}>
+            {w.status[0].toUpperCase() + w.status.slice(1)}
+          </span>
+        </div>
+      </td>
+      <td className="px-4 py-3 align-top">
+        <AssetCell asset={asset} meta={meta} />
+      </td>
+      <td className="px-4 py-3 align-top">
+        <p className="text-red-400">−{fmtUsd(amount)}</p>
+        {w.amount_crypto !== null && (
+          <p className="text-xs text-zinc-500">
+            {Number(w.amount_crypto)} {asset}
+          </p>
+        )}
+      </td>
+      <td className="px-4 py-3 align-top font-mono text-xs">
+        {w.status === "completed" && shortHash ? (
+          explorer ? (
+            <a
+              href={explorer}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-gold hover:underline"
+            >
+              {shortHash} ↗
+            </a>
+          ) : (
+            <span className="break-all text-zinc-300">{shortHash}</span>
+          )
+        ) : (
+          <div className="space-y-1">
+            <p className="text-zinc-500">to</p>
+            <p className="break-all text-zinc-300">{shortDest}</p>
+            {w.status === "rejected" && w.admin_note && (
+              <p className="font-sans text-[10px] text-red-400">
+                Rejected: {w.admin_note}
+              </p>
+            )}
+          </div>
+        )}
+      </td>
+    </tr>
+  );
+}
+
+function AssetCell({ asset, meta }: { asset: string; meta?: AssetMeta }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span
+        className="flex h-7 w-7 items-center justify-center rounded-full text-[10px] font-semibold text-white"
+        style={{ backgroundColor: meta?.color ?? "#444" }}
+      >
+        {asset.slice(0, 3)}
+      </span>
+      <div>
+        <p className="text-white">{meta?.name ?? asset}</p>
+        <p className="text-xs text-zinc-500">{asset}</p>
+      </div>
+    </div>
+  );
+}
+
+function WithdrawDialog({
+  assets,
+  available,
+  dailyLimit,
+  onClose,
+  onSubmitted,
+}: {
+  assets: AssetMeta[];
+  available: number;
+  dailyLimit: number;
+  onClose: () => void;
+  onSubmitted: () => void | Promise<void>;
+}) {
+  const [asset, setAsset] = useState("");
+  const [amountUsd, setAmountUsd] = useState("");
+  const [amountCrypto, setAmountCrypto] = useState("");
+  const [destination, setDestination] = useState("");
+  const [network, setNetwork] = useState("");
+  const [note, setNote] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setSubmitting(true);
+    setError(null);
+    try {
+      const usd = Number(amountUsd);
+      if (!Number.isFinite(usd) || usd <= 0) throw new Error("Enter a positive amount.");
+      if (usd > available) throw new Error(`Only ${fmtUsd(available)} available.`);
+      const crypto = amountCrypto.trim() ? Number(amountCrypto) : null;
+      if (crypto !== null && (!Number.isFinite(crypto) || crypto <= 0)) {
+        throw new Error("Crypto amount must be positive if provided.");
+      }
+      const supabase = createSupabaseBrowserClient();
+      const { data, error: invokeError } = await supabase.functions.invoke(
+        "user-request-withdrawal",
+        {
+          body: {
+            asset,
+            amountUsd: usd,
+            amountCrypto: crypto,
+            destinationAddress: destination.trim(),
+            network: network.trim() || null,
+            note: note.trim() || null,
+          },
+        },
+      );
+      if (invokeError) throw invokeError;
+      const payload = data as { ok?: boolean; error?: string };
+      if (!payload?.ok) throw new Error(payload?.error ?? "Failed");
+      await onSubmitted();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to request withdrawal.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  const networkOptions = asset ? MULTI_CHAIN_ASSETS[asset] : undefined;
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4"
+      onClick={onClose}
+    >
+      <form
+        onSubmit={handleSubmit}
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-lg space-y-4 rounded-2xl border border-border bg-surface p-6"
+      >
+        <div>
+          <h3 className="font-display text-xl font-semibold text-white">Withdraw</h3>
+          <p className="mt-1 text-xs text-zinc-500">
+            Available: {fmtUsd(available)}
+            {dailyLimit > 0 && ` · Daily limit: ${fmtUsd(dailyLimit)}`}
+          </p>
+        </div>
+        <label className="block text-xs uppercase tracking-wider text-zinc-400">
+          Asset
+          <select
+            required
+            value={asset}
+            onChange={(e) => {
+              const next = e.target.value;
+              setAsset(next);
+              const opts = MULTI_CHAIN_ASSETS[next];
+              setNetwork(opts ? opts[0].value : "");
+            }}
+            className="input mt-1 w-full"
+          >
+            <option value="">Select an asset…</option>
+            {assets.map((a) => (
+              <option key={a.ticker} value={a.ticker}>
+                {a.name} ({a.ticker})
+              </option>
+            ))}
+          </select>
+        </label>
+        <Input
+          label="Amount (USD)"
+          type="number"
+          min="0"
+          step="0.01"
+          value={amountUsd}
+          onChange={(e) => setAmountUsd(e.target.value)}
+          required
+        />
+        <Input
+          label="Amount in crypto (optional)"
+          type="number"
+          min="0"
+          step="any"
+          value={amountCrypto}
+          onChange={(e) => setAmountCrypto(e.target.value)}
+        />
+        <Input
+          label="Destination address"
+          value={destination}
+          onChange={(e) => setDestination(e.target.value)}
+          hint="Where the asset should be sent. Double-check before submitting."
+          required
+        />
+        {networkOptions && (
+          <label className="block text-xs uppercase tracking-wider text-zinc-400">
+            Network
+            <select
+              required
+              value={network}
+              onChange={(e) => setNetwork(e.target.value)}
+              className="input mt-1 w-full"
+            >
+              {networkOptions.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        <Input
+          label="Note (optional)"
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+        />
+        <p className="text-[10px] text-zinc-500">
+          Withdrawals require admin approval. Your balance is reserved while the
+          request is pending and refunded if rejected.
+        </p>
+        {error && <p className="text-xs text-red-400">{error}</p>}
+        <div className="flex justify-end gap-2 pt-2">
+          <button type="button" onClick={onClose} className="btn-outline text-xs">
+            Cancel
+          </button>
+          <button type="submit" disabled={submitting} className="btn-gold text-xs">
+            {submitting ? "Submitting…" : "Request withdrawal"}
+          </button>
+        </div>
+      </form>
+    </div>
   );
 }
 
