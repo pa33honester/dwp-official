@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { useAccount } from "wagmi";
@@ -238,6 +238,12 @@ export default function DashboardPage() {
         </section>
       )}
 
+      {activated && (
+        <section className="mt-10">
+          <PortfolioChart deposits={deposits} balanceUsd={totalUsd} />
+        </section>
+      )}
+
       {activated && allocation && (
         <section className="mt-10">
           <h3 className="mb-4 text-sm font-semibold uppercase tracking-wider text-gold">
@@ -390,6 +396,199 @@ export default function DashboardPage() {
         <CryptoDepositGrid />
       </section>
     </main>
+  );
+}
+
+type Range = "1D" | "7D" | "1M" | "6M" | "1Y" | "ALL";
+
+const RANGE_DAYS: Record<Range, number | null> = {
+  "1D": 1,
+  "7D": 7,
+  "1M": 30,
+  "6M": 180,
+  "1Y": 365,
+  ALL: null,
+};
+
+function PortfolioChart({
+  deposits,
+  balanceUsd,
+}: {
+  deposits: DepositRow[];
+  balanceUsd: number;
+}) {
+  const [range, setRange] = useState<Range>("1M");
+  const now = useMemo(() => Date.now(), []);
+
+  const series = useMemo(() => {
+    const sorted = [...deposits].sort(
+      (a, b) =>
+        new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+    );
+    const points: { t: number; v: number }[] = [];
+    let cum = 0;
+    for (const d of sorted) {
+      const t = new Date(d.created_at).getTime();
+      points.push({ t, v: cum });
+      cum += Number(d.amount_usd) || 0;
+      points.push({ t, v: cum });
+    }
+    if (points.length === 0) {
+      points.push({ t: now - 30 * 86400000, v: balanceUsd });
+    }
+    if (points[points.length - 1].v !== balanceUsd) {
+      points.push({ t: now, v: balanceUsd });
+    } else if (points[points.length - 1].t < now) {
+      points.push({ t: now, v: balanceUsd });
+    }
+    return points;
+  }, [deposits, balanceUsd, now]);
+
+  const visible = useMemo(() => {
+    const days = RANGE_DAYS[range];
+    if (days === null) return series;
+    const startTime = now - days * 86400000;
+    if (series.length === 0) return [];
+    let startValue = series[0].v;
+    let firstInRangeIdx = series.length;
+    for (let i = 0; i < series.length; i++) {
+      if (series[i].t < startTime) {
+        startValue = series[i].v;
+      } else {
+        firstInRangeIdx = i;
+        break;
+      }
+    }
+    return [{ t: startTime, v: startValue }, ...series.slice(firstInRangeIdx)];
+  }, [series, range, now]);
+
+  const W = 800;
+  const H = 240;
+  const padL = 56;
+  const padR = 16;
+  const padT = 16;
+  const padB = 28;
+  const innerW = W - padL - padR;
+  const innerH = H - padT - padB;
+
+  const xMin = visible[0]?.t ?? now;
+  const xMax = visible[visible.length - 1]?.t ?? now;
+  const xSpan = Math.max(1, xMax - xMin);
+  const yMax = Math.max(1, ...visible.map((p) => p.v)) * 1.1;
+
+  const xScale = (t: number) => padL + ((t - xMin) / xSpan) * innerW;
+  const yScale = (v: number) => padT + innerH - (v / yMax) * innerH;
+
+  const linePath = visible
+    .map(
+      (p, i) => `${i === 0 ? "M" : "L"} ${xScale(p.t).toFixed(2)} ${yScale(p.v).toFixed(2)}`,
+    )
+    .join(" ");
+  const areaPath =
+    visible.length > 0
+      ? `${linePath} L ${xScale(visible[visible.length - 1].t).toFixed(2)} ${yScale(0).toFixed(2)} L ${xScale(visible[0].t).toFixed(2)} ${yScale(0).toFixed(2)} Z`
+      : "";
+
+  const yTicks = Array.from({ length: 5 }, (_, i) => (yMax * i) / 4);
+  const xTickCount = 6;
+  const xTicks = Array.from(
+    { length: xTickCount },
+    (_, i) => xMin + (xSpan * i) / (xTickCount - 1),
+  );
+
+  const fmtDate = (t: number) =>
+    new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(
+      new Date(t),
+    );
+
+  const fmtAxis = (n: number) => {
+    if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(n % 1_000_000 === 0 ? 0 : 1)}M`;
+    if (n >= 1_000) return `$${(n / 1_000).toFixed(n % 1_000 === 0 ? 0 : 1)}K`;
+    return `$${n.toFixed(0)}`;
+  };
+
+  return (
+    <div className="rounded-2xl border border-border bg-surface p-6">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-sm font-semibold uppercase tracking-wider text-gold">
+          Portfolio Overview
+        </h3>
+        <div className="flex flex-wrap gap-1">
+          {(Object.keys(RANGE_DAYS) as Range[]).map((r) => (
+            <button
+              key={r}
+              type="button"
+              onClick={() => setRange(r)}
+              className={`rounded-full px-3 py-1 text-[11px] font-semibold transition ${
+                range === r
+                  ? "bg-gold text-zinc-900"
+                  : "bg-elevated text-zinc-400 hover:text-zinc-200"
+              }`}
+            >
+              {r === "ALL" ? "All" : r}
+            </button>
+          ))}
+        </div>
+      </div>
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        preserveAspectRatio="none"
+        className="h-60 w-full"
+      >
+        <defs>
+          <linearGradient id="portfolio-area" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#D4A24C" stopOpacity="0.3" />
+            <stop offset="100%" stopColor="#D4A24C" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        {yTicks.map((v, i) => (
+          <g key={`y-${i}`}>
+            <line
+              x1={padL}
+              x2={W - padR}
+              y1={yScale(v)}
+              y2={yScale(v)}
+              stroke="#27272A"
+              strokeWidth="1"
+              vectorEffect="non-scaling-stroke"
+            />
+            <text
+              x={padL - 8}
+              y={yScale(v) + 4}
+              textAnchor="end"
+              fontSize="10"
+              fill="#71717A"
+            >
+              {fmtAxis(v)}
+            </text>
+          </g>
+        ))}
+        {areaPath && <path d={areaPath} fill="url(#portfolio-area)" />}
+        {linePath && (
+          <path
+            d={linePath}
+            fill="none"
+            stroke="#D4A24C"
+            strokeWidth="2"
+            strokeLinejoin="round"
+            strokeLinecap="round"
+            vectorEffect="non-scaling-stroke"
+          />
+        )}
+        {xTicks.map((t, i) => (
+          <text
+            key={`x-${i}`}
+            x={xScale(t)}
+            y={H - 8}
+            textAnchor={i === 0 ? "start" : i === xTicks.length - 1 ? "end" : "middle"}
+            fontSize="10"
+            fill="#71717A"
+          >
+            {fmtDate(t)}
+          </text>
+        ))}
+      </svg>
+    </div>
   );
 }
 
