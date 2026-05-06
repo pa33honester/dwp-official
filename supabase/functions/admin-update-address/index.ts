@@ -56,8 +56,10 @@ Deno.serve(async (req) => {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 
+  // Tickers are seeded in 0002_admin.sql and never inserted via this
+  // function — use UPDATE so we don't trip the NOT NULL constraints on
+  // name/color when callers only pass address/QR.
   const row: Record<string, unknown> = {
-    ticker,
     updated_at: new Date().toISOString(),
   };
   if (typeof body.address === "string") row.address = body.address.trim();
@@ -65,10 +67,14 @@ Deno.serve(async (req) => {
   if (body.color?.trim()) row.color = body.color.trim();
   if (body.qrImageDataUrl !== undefined) row.qr_image_data_url = body.qrImageDataUrl;
 
-  const { error } = await admin
+  const { data: updated, error } = await admin
     .from("deposit_addresses")
-    .upsert(row, { onConflict: "ticker" });
+    .update(row)
+    .eq("ticker", ticker)
+    .select("ticker")
+    .maybeSingle();
   if (error) return json({ error: error.message }, 500, cors);
+  if (!updated) return json({ error: `Unknown ticker: ${ticker}` }, 404, cors);
 
   return json({ ok: true }, 200, cors);
 });
