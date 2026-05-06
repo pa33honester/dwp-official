@@ -6,6 +6,24 @@ import { Input } from "@/components/forms/Field";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { getExplorerUrl, MULTI_CHAIN_ASSETS } from "@/lib/explorer-urls";
 
+async function readFnError(err: unknown, fallback = "Failed"): Promise<string> {
+  if (err && typeof err === "object" && "context" in err) {
+    const ctx = (err as { context: unknown }).context;
+    if (ctx instanceof Response) {
+      try {
+        const body = (await ctx.clone().json()) as { error?: string };
+        if (body?.error) return body.error;
+      } catch {
+        try {
+          const text = await ctx.clone().text();
+          if (text) return text;
+        } catch {}
+      }
+    }
+  }
+  return err instanceof Error ? err.message : fallback;
+}
+
 type Tab = "users" | "addresses" | "deposits" | "withdrawals";
 
 type AdminUser = {
@@ -1445,7 +1463,10 @@ function AddressesTab() {
       const { data, error: invokeError } = await supabase.functions.invoke("admin-update-address", {
         body,
       });
-      if (invokeError) throw invokeError;
+      if (invokeError) {
+        const msg = await readFnError(invokeError, "Failed to save address.");
+        throw new Error(msg);
+      }
       const payload = data as { ok?: boolean; error?: string };
       if (!payload?.ok) throw new Error(payload?.error ?? "Failed");
       setSavedTicker(ticker);
