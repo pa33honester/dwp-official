@@ -1509,8 +1509,10 @@ function AddressesTab() {
           </thead>
           <tbody>
             {rows.map((r) => {
-              const previewSrc = qrEdits[r.ticker] ?? r.qr_image_data_url ?? null;
-              const dirty = edits[r.ticker] !== undefined || qrEdits[r.ticker] !== undefined;
+              // Distinguish "no edit" (use saved) from "edited to null" (remove).
+              const previewSrc =
+                r.ticker in qrEdits ? qrEdits[r.ticker] : r.qr_image_data_url ?? null;
+              const dirty = edits[r.ticker] !== undefined || r.ticker in qrEdits;
               return (
                 <tr key={r.ticker} className="border-t border-border">
                   <td className="px-4 py-3 align-top">
