@@ -12,7 +12,7 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "DigitalWealth Partners — Gateway to Digital Investments",
+  title: "Digital Wealth Partners - Gateway to Digital Investments",
   description:
     "Digital Wealth Partners: tailored digital asset strategies for Family Offices, HNWIs, and RIAs.",
 };
