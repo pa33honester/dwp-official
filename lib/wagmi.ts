@@ -12,7 +12,7 @@ import {
 } from "wagmi/chains";
 
 export const wagmiConfig = getDefaultConfig({
-  appName: "DigitalWealth Partners",
+  appName: "Digital Wealth Partners",
   projectId: process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID ?? "demo",
   chains: [mainnet, base, bsc, polygon, arbitrum, optimism, avalanche],
   ssr: true,

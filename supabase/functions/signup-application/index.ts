@@ -41,7 +41,7 @@ const EMAIL_SUBJECTS = {
 function emailHtml(template: keyof typeof EMAIL_SUBJECTS, name: string) {
   const open = `<div style="background:#0a0a0a;color:#fff;font-family:Inter,sans-serif;padding:32px;">
     <div style="max-width:560px;margin:0 auto;border:1px solid #2a2520;border-radius:12px;background:#14110f;padding:32px;">
-      <h1 style="color:#D4A24C;font-size:22px;margin:0 0 16px 0;">DigitalWealth Partners</h1>`;
+      <h1 style="color:#D4A24C;font-size:22px;margin:0 0 16px 0;">Digital Wealth Partners</h1>`;
   const close = `<p style="color:#a1a1aa;font-size:12px;margin-top:32px;">If you did not request this, you can safely ignore this email.</p></div></div>`;
 
   if (template === "wallet") {

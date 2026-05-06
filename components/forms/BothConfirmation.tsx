@@ -29,7 +29,7 @@ export function BothConfirmation() {
 
       <div className="max-w-xl">
         <h2 className="text-2xl font-semibold text-white md:text-3xl">
-          Welcome to DigitalWealth
+          Welcome to Digital Wealth
         </h2>
         <p className="mt-3 text-sm leading-relaxed text-zinc-300">
           Your wallet has been successfully secured. Your Digital Asset LLC
