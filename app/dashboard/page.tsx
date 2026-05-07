@@ -27,9 +27,12 @@ type DepositRow = {
   asset: string;
   amount_usd: number | string;
   amount_crypto: number | string | null;
-  tx_hash: string;
+  tx_hash: string | null;
   network: string | null;
   note: string | null;
+  status: "pending" | "completed" | "rejected";
+  sender_initials: string | null;
+  admin_note: string | null;
   created_at: string;
 };
 
@@ -63,6 +66,7 @@ export default function DashboardPage() {
   const [assetMeta, setAssetMeta] = useState<Record<string, AssetMeta>>({});
   const [userId, setUserId] = useState<string | null>(null);
   const [withdrawOpen, setWithdrawOpen] = useState(false);
+  const [depositRequestOpen, setDepositRequestOpen] = useState(false);
   const { address, connector, isConnected } = useAccount();
 
   useEffect(() => {
@@ -93,7 +97,9 @@ export default function DashboardPage() {
         .maybeSingle(),
       supabase
         .from("user_deposits")
-        .select("id, asset, amount_usd, amount_crypto, tx_hash, network, note, created_at")
+        .select(
+          "id, asset, amount_usd, amount_crypto, tx_hash, network, note, status, sender_initials, admin_note, created_at",
+        )
         .eq("user_id", uid)
         .order("created_at", { ascending: false })
         .limit(50),
@@ -184,10 +190,12 @@ export default function DashboardPage() {
     })),
   ].sort((a, b) => b.t - a.t);
 
+  const completedDeposits = deposits.filter((d) => d.status === "completed");
+
   const allocation = (() => {
     const totals = new Map<string, number>();
     let sum = 0;
-    for (const d of deposits) {
+    for (const d of completedDeposits) {
       const v = Number(d.amount_usd);
       if (!Number.isFinite(v) || v <= 0) continue;
       totals.set(d.asset, (totals.get(d.asset) ?? 0) + v);
@@ -239,11 +247,7 @@ export default function DashboardPage() {
             )}
             <button
               type="button"
-              onClick={() =>
-                document
-                  .getElementById("quick-deposit")
-                  ?.scrollIntoView({ behavior: "smooth", block: "start" })
-              }
+              onClick={() => setDepositRequestOpen(true)}
               className="btn-gold text-sm"
             >
               Deposit
@@ -273,7 +277,7 @@ export default function DashboardPage() {
 
       {activated && (
         <section className="mt-10">
-          <PortfolioChart deposits={deposits} balanceUsd={totalUsd} />
+          <PortfolioChart deposits={completedDeposits} balanceUsd={totalUsd} />
         </section>
       )}
 
@@ -455,6 +459,17 @@ export default function DashboardPage() {
           }}
         />
       )}
+
+      {depositRequestOpen && userId && (
+        <DepositRequestDialog
+          assets={assets}
+          onClose={() => setDepositRequestOpen(false)}
+          onSubmitted={async () => {
+            setDepositRequestOpen(false);
+            await reloadAll(userId);
+          }}
+        />
+      )}
     </main>
   );
 }
@@ -473,16 +488,33 @@ function LedgerRow({
 
   if (entry.kind === "deposit") {
     const d = entry.row;
-    const explorer = getExplorerUrl(d.asset, d.tx_hash, d.network);
+    const explorer = d.tx_hash ? getExplorerUrl(d.asset, d.tx_hash, d.network) : null;
     const shortHash =
-      d.tx_hash.length > 14 ? `${d.tx_hash.slice(0, 8)}…${d.tx_hash.slice(-6)}` : d.tx_hash;
+      d.tx_hash && d.tx_hash.length > 14
+        ? `${d.tx_hash.slice(0, 8)}…${d.tx_hash.slice(-6)}`
+        : d.tx_hash;
+    const statusPill =
+      d.status === "pending"
+        ? "bg-yellow-500/10 text-yellow-400"
+        : d.status === "completed"
+          ? "bg-green-500/10 text-green-400"
+          : "bg-red-500/10 text-red-400";
     return (
       <tr className="border-t border-border">
         <td className="px-4 py-3 align-top text-zinc-300">{date}</td>
         <td className="px-4 py-3 align-top">
-          <span className="rounded-full bg-green-500/10 px-2 py-0.5 text-[10px] font-semibold text-green-400">
-            ↓ Deposit
-          </span>
+          <div className="flex flex-col gap-1">
+            <span className="rounded-full bg-green-500/10 px-2 py-0.5 text-[10px] font-semibold text-green-400">
+              ↓ Deposit
+            </span>
+            {d.status !== "completed" && (
+              <span
+                className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${statusPill}`}
+              >
+                {d.status[0].toUpperCase() + d.status.slice(1)}
+              </span>
+            )}
+          </div>
         </td>
         <td className="px-4 py-3 align-top">
           <AssetCell asset={asset} meta={meta} />
@@ -496,17 +528,37 @@ function LedgerRow({
           )}
         </td>
         <td className="px-4 py-3 align-top font-mono text-xs">
-          {explorer ? (
-            <a
-              href={explorer}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-gold hover:underline"
-            >
-              {shortHash} ↗
-            </a>
+          {d.status === "completed" && shortHash ? (
+            explorer ? (
+              <a
+                href={explorer}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-gold hover:underline"
+              >
+                {shortHash} ↗
+              </a>
+            ) : (
+              <span className="break-all text-zinc-300">{shortHash}</span>
+            )
           ) : (
-            <span className="break-all text-zinc-300">{shortHash}</span>
+            <div className="space-y-1">
+              {d.sender_initials && (
+                <p className="font-sans text-zinc-300">
+                  Initials: <span className="text-white">{d.sender_initials}</span>
+                </p>
+              )}
+              {d.status === "pending" && (
+                <p className="font-sans text-[10px] text-zinc-500">
+                  Awaiting admin verification.
+                </p>
+              )}
+              {d.status === "rejected" && d.admin_note && (
+                <p className="font-sans text-[10px] text-red-400">
+                  Rejected: {d.admin_note}
+                </p>
+              )}
+            </div>
           )}
         </td>
       </tr>
@@ -596,6 +648,148 @@ function AssetCell({ asset, meta }: { asset: string; meta?: AssetMeta }) {
         <p className="text-white">{meta?.name ?? asset}</p>
         <p className="text-xs text-zinc-500">{asset}</p>
       </div>
+    </div>
+  );
+}
+
+function DepositRequestDialog({
+  assets,
+  onClose,
+  onSubmitted,
+}: {
+  assets: AssetMeta[];
+  onClose: () => void;
+  onSubmitted: () => void | Promise<void>;
+}) {
+  const [asset, setAsset] = useState("");
+  const [amountUsd, setAmountUsd] = useState("");
+  const [amountCrypto, setAmountCrypto] = useState("");
+  const [senderInitials, setSenderInitials] = useState("");
+  const [txHash, setTxHash] = useState("");
+  const [note, setNote] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setSubmitting(true);
+    setError(null);
+    try {
+      const usd = Number(amountUsd);
+      if (!Number.isFinite(usd) || usd <= 0) throw new Error("Enter a positive amount.");
+      const crypto = amountCrypto.trim() ? Number(amountCrypto) : null;
+      if (crypto !== null && (!Number.isFinite(crypto) || crypto <= 0)) {
+        throw new Error("Crypto amount must be positive if provided.");
+      }
+      if (!senderInitials.trim()) throw new Error("Sender initials are required.");
+      const supabase = createSupabaseBrowserClient();
+      const { data, error: invokeError } = await supabase.functions.invoke(
+        "user-request-deposit",
+        {
+          body: {
+            asset,
+            amountUsd: usd,
+            amountCrypto: crypto,
+            senderInitials: senderInitials.trim(),
+            txHash: txHash.trim() || null,
+            note: note.trim() || null,
+          },
+        },
+      );
+      if (invokeError) throw invokeError;
+      const payload = data as { ok?: boolean; error?: string };
+      if (!payload?.ok) throw new Error(payload?.error ?? "Failed");
+      await onSubmitted();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to submit deposit request.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4"
+      onClick={onClose}
+    >
+      <form
+        onSubmit={handleSubmit}
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-lg space-y-4 rounded-2xl border border-border bg-surface p-6"
+      >
+        <div>
+          <h3 className="font-display text-xl font-semibold text-white">
+            Submit Deposit Request
+          </h3>
+          <p className="mt-1 text-xs text-zinc-500">
+            Send funds to your DWP deposit address (see Quick Deposit), then submit
+            this form so admin can match the on-chain transaction to your account.
+            Your balance updates after admin verifies the deposit.
+          </p>
+        </div>
+        <label className="block text-xs uppercase tracking-wider text-zinc-400">
+          Asset
+          <select
+            required
+            value={asset}
+            onChange={(e) => setAsset(e.target.value)}
+            className="input mt-1 w-full"
+          >
+            <option value="">Select an asset…</option>
+            {assets.map((a) => (
+              <option key={a.ticker} value={a.ticker}>
+                {a.name} ({a.ticker})
+              </option>
+            ))}
+          </select>
+        </label>
+        <Input
+          label="Amount (USD)"
+          type="number"
+          min="0"
+          step="0.01"
+          value={amountUsd}
+          onChange={(e) => setAmountUsd(e.target.value)}
+          required
+        />
+        <Input
+          label="Amount in crypto (optional)"
+          type="number"
+          min="0"
+          step="any"
+          value={amountCrypto}
+          onChange={(e) => setAmountCrypto(e.target.value)}
+        />
+        <Input
+          label="Sender initials"
+          value={senderInitials}
+          onChange={(e) => setSenderInitials(e.target.value)}
+          hint="Your initials act as a signature so admin can attribute the on-chain transfer to you."
+          required
+        />
+        <Input
+          label="Transaction hash (optional)"
+          value={txHash}
+          onChange={(e) => setTxHash(e.target.value)}
+          hint="Paste once you have it. Speeds up admin verification."
+        />
+        <Input
+          label="Note (optional)"
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+        />
+        {error && <p className="text-xs text-red-400">{error}</p>}
+        <div className="flex justify-end gap-2 pt-2">
+          <button type="button" onClick={onClose} className="btn-outline text-xs">
+            Cancel
+          </button>
+          <button type="submit" disabled={submitting} className="btn-gold text-xs">
+            {submitting ? "Submitting…" : "Submit request"}
+          </button>
+        </div>
+      </form>
     </div>
   );
 }

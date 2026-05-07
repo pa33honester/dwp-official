@@ -706,9 +706,12 @@ type DepositRecord = {
   asset: string;
   amount_usd: number | string;
   amount_crypto: number | string | null;
-  tx_hash: string;
+  tx_hash: string | null;
   network: string | null;
   note: string | null;
+  status: "pending" | "completed" | "rejected";
+  sender_initials: string | null;
+  admin_note: string | null;
   created_at: string;
 };
 
@@ -718,21 +721,52 @@ function DepositsTab() {
   const [deposits, setDeposits] = useState<DepositRecord[] | null>(null);
   const [depositsError, setDepositsError] = useState<string | null>(null);
   const [recording, setRecording] = useState(false);
+  const [filter, setFilter] = useState<"pending" | "all">("pending");
+  const [actingId, setActingId] = useState<string | null>(null);
+  const [approveFor, setApproveFor] = useState<DepositRecord | null>(null);
 
   async function loadDeposits() {
     setDepositsError(null);
     const supabase = createSupabaseBrowserClient();
     const { data, error } = await supabase
       .from("user_deposits")
-      .select("id, user_id, asset, amount_usd, amount_crypto, tx_hash, network, note, created_at")
+      .select(
+        "id, user_id, asset, amount_usd, amount_crypto, tx_hash, network, note, status, sender_initials, admin_note, created_at",
+      )
       .order("created_at", { ascending: false })
-      .limit(50);
+      .limit(100);
     if (error) {
       setDepositsError(error.message);
       setDeposits([]);
       return;
     }
     setDeposits((data as DepositRecord[] | null) ?? []);
+  }
+
+  async function rejectDeposit(d: DepositRecord) {
+    const reason =
+      window.prompt(`Reject this deposit (${fmtUsd(Number(d.amount_usd))} ${d.asset})? Optional note:`, "") ?? null;
+    if (reason === null) return;
+    setActingId(d.id);
+    setDepositsError(null);
+    try {
+      const supabase = createSupabaseBrowserClient();
+      const { data, error: invokeError } = await supabase.functions.invoke(
+        "admin-reject-deposit",
+        { body: { depositId: d.id, adminNote: reason || null } },
+      );
+      if (invokeError) {
+        const msg = await readFnError(invokeError, "Failed to reject deposit.");
+        throw new Error(msg);
+      }
+      const payload = data as { ok?: boolean; error?: string };
+      if (!payload?.ok) throw new Error(payload?.error ?? "Failed");
+      await loadDeposits();
+    } catch (err) {
+      setDepositsError(err instanceof Error ? err.message : "Failed to reject deposit.");
+    } finally {
+      setActingId(null);
+    }
   }
 
   useEffect(() => {
@@ -759,13 +793,33 @@ function DepositsTab() {
 
   const userById = new Map(users.map((u) => [u.id, u]));
   const assetByTicker = new Map(assets.map((a) => [a.ticker, a]));
+  const visibleDeposits = (deposits ?? []).filter((d) =>
+    filter === "pending" ? d.status === "pending" : true,
+  );
+  const pendingCount = (deposits ?? []).filter((d) => d.status === "pending").length;
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-zinc-400">
-          {deposits?.length ?? 0} deposit{(deposits?.length ?? 0) === 1 ? "" : "s"}
-        </p>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="inline-flex overflow-hidden rounded-md border border-border">
+            {(["pending", "all"] as const).map((f) => (
+              <button
+                key={f}
+                type="button"
+                onClick={() => setFilter(f)}
+                className={`px-3 py-1.5 text-xs ${
+                  filter === f ? "bg-gold text-zinc-900" : "bg-elevated text-zinc-400"
+                }`}
+              >
+                {f === "pending" ? `Pending${pendingCount > 0 ? ` (${pendingCount})` : ""}` : "All"}
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-zinc-500">
+            {visibleDeposits.length} {filter === "pending" ? "pending" : "total"}
+          </p>
+        </div>
         <div className="flex items-center gap-3">
           <button
             type="button"
@@ -788,9 +842,16 @@ function DepositsTab() {
       )}
       {deposits === null ? (
         <p className="text-sm text-zinc-400">Loading deposits…</p>
-      ) : deposits.length === 0 ? (
+      ) : visibleDeposits.length === 0 ? (
         <p className="rounded-2xl border border-dashed border-border bg-surface/40 p-6 text-center text-sm text-zinc-500">
-          No deposits recorded yet. Click <span className="text-gold">+ Record Deposit</span> to log one.
+          {filter === "pending"
+            ? "No pending deposit requests."
+            : "No deposits recorded yet."}{" "}
+          {filter === "all" && (
+            <>
+              Click <span className="text-gold">+ Record Deposit</span> to log one.
+            </>
+          )}
         </p>
       ) : (
         <div className="overflow-x-auto rounded-2xl border border-border bg-surface">
@@ -801,19 +862,28 @@ function DepositsTab() {
                 <th className="px-4 py-3">User</th>
                 <th className="px-4 py-3">Asset</th>
                 <th className="px-4 py-3">Amount</th>
-                <th className="px-4 py-3">TX hash</th>
+                <th className="px-4 py-3">Status / TX</th>
                 <th className="px-4 py-3">Note</th>
+                <th className="px-4 py-3">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {deposits.map((d) => {
+              {visibleDeposits.map((d) => {
                 const u = userById.get(d.user_id);
                 const meta = assetByTicker.get(d.asset);
-                const explorer = getExplorerUrl(d.asset, d.tx_hash, d.network);
+                const explorer = d.tx_hash
+                  ? getExplorerUrl(d.asset, d.tx_hash, d.network)
+                  : null;
                 const shortHash =
-                  d.tx_hash.length > 14
+                  d.tx_hash && d.tx_hash.length > 14
                     ? `${d.tx_hash.slice(0, 8)}…${d.tx_hash.slice(-6)}`
                     : d.tx_hash;
+                const statusPill =
+                  d.status === "pending"
+                    ? "bg-yellow-500/10 text-yellow-400"
+                    : d.status === "completed"
+                      ? "bg-green-500/10 text-green-400"
+                      : "bg-red-500/10 text-red-400";
                 return (
                   <tr key={d.id} className="border-t border-border">
                     <td className="px-4 py-3 align-top text-zinc-300">
@@ -822,6 +892,12 @@ function DepositsTab() {
                     <td className="px-4 py-3 align-top">
                       <p className="text-white">{u?.fullName ?? u?.email ?? "—"}</p>
                       <p className="text-xs text-zinc-500">{u?.email ?? d.user_id}</p>
+                      {d.sender_initials && (
+                        <p className="mt-1 text-xs text-zinc-400">
+                          Initials:{" "}
+                          <span className="text-white">{d.sender_initials}</span>
+                        </p>
+                      )}
                     </td>
                     <td className="px-4 py-3 align-top">
                       <div className="flex items-center gap-2">
@@ -845,22 +921,62 @@ function DepositsTab() {
                         </p>
                       )}
                     </td>
-                    <td className="px-4 py-3 align-top font-mono text-xs">
-                      {explorer ? (
-                        <a
-                          href={explorer}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-gold hover:underline"
+                    <td className="px-4 py-3 align-top">
+                      <div className="flex flex-col gap-1">
+                        <span
+                          className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-semibold ${statusPill}`}
                         >
-                          {shortHash} ↗
-                        </a>
-                      ) : (
-                        <span className="break-all text-zinc-300">{shortHash}</span>
-                      )}
+                          {d.status[0].toUpperCase() + d.status.slice(1)}
+                        </span>
+                        {shortHash && (
+                          <span className="font-mono text-xs">
+                            {explorer ? (
+                              <a
+                                href={explorer}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-gold hover:underline"
+                              >
+                                {shortHash} ↗
+                              </a>
+                            ) : (
+                              <span className="break-all text-zinc-300">{shortHash}</span>
+                            )}
+                          </span>
+                        )}
+                        {d.admin_note && (
+                          <span className="font-sans text-[10px] text-zinc-500">
+                            “{d.admin_note}”
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-4 py-3 align-top text-zinc-300">
                       {d.note ?? <span className="text-zinc-600">—</span>}
+                    </td>
+                    <td className="px-4 py-3 align-top">
+                      {d.status === "pending" ? (
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setApproveFor(d)}
+                            disabled={actingId === d.id}
+                            className="btn-outline text-xs"
+                          >
+                            Approve
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => rejectDeposit(d)}
+                            disabled={actingId === d.id}
+                            className="text-xs text-red-400 hover:text-red-300 disabled:text-zinc-600"
+                          >
+                            {actingId === d.id ? "…" : "Reject"}
+                          </button>
+                        </div>
+                      ) : (
+                        <span className="text-xs text-zinc-600">—</span>
+                      )}
                     </td>
                   </tr>
                 );
@@ -877,6 +993,17 @@ function DepositsTab() {
           onClose={() => setRecording(false)}
           onRecorded={async () => {
             setRecording(false);
+            await loadDeposits();
+          }}
+        />
+      )}
+
+      {approveFor && (
+        <ApproveDepositDialog
+          deposit={approveFor}
+          onClose={() => setApproveFor(null)}
+          onApproved={async () => {
+            setApproveFor(null);
             await loadDeposits();
           }}
         />
@@ -1059,6 +1186,104 @@ function RecordDepositDialog({
           </button>
           <button type="submit" disabled={submitting} className="btn-gold text-xs">
             {submitting ? "Recording…" : "Record deposit"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function ApproveDepositDialog({
+  deposit,
+  onClose,
+  onApproved,
+}: {
+  deposit: DepositRecord;
+  onClose: () => void;
+  onApproved: () => void | Promise<void>;
+}) {
+  const [txHash, setTxHash] = useState(deposit.tx_hash ?? "");
+  const [adminNote, setAdminNote] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setSubmitting(true);
+    setError(null);
+    try {
+      if (!txHash.trim()) throw new Error("Transaction hash is required.");
+      const supabase = createSupabaseBrowserClient();
+      const { data, error: invokeError } = await supabase.functions.invoke(
+        "admin-approve-deposit",
+        {
+          body: {
+            depositId: deposit.id,
+            txHash: txHash.trim(),
+            adminNote: adminNote.trim() || null,
+          },
+        },
+      );
+      if (invokeError) {
+        const msg = await readFnError(invokeError, "Failed to approve deposit.");
+        throw new Error(msg);
+      }
+      const payload = data as { ok?: boolean; error?: string };
+      if (!payload?.ok) throw new Error(payload?.error ?? "Failed");
+      await onApproved();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to approve deposit.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4"
+      onClick={onClose}
+    >
+      <form
+        onSubmit={handleSubmit}
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-lg space-y-4 rounded-2xl border border-border bg-surface p-6"
+      >
+        <div>
+          <h3 className="font-display text-xl font-semibold text-white">
+            Approve deposit
+          </h3>
+          <p className="mt-1 text-xs text-zinc-500">
+            Crediting {fmtUsd(Number(deposit.amount_usd))} of {deposit.asset} to the
+            user&apos;s balance.
+            {deposit.sender_initials && (
+              <>
+                {" "}Submitted with initials{" "}
+                <span className="font-mono text-zinc-300">{deposit.sender_initials}</span>.
+              </>
+            )}
+          </p>
+        </div>
+        <Input
+          label="Transaction hash"
+          value={txHash}
+          onChange={(e) => setTxHash(e.target.value)}
+          hint="The on-chain hash you observed. Verifies the deposit for the user."
+          required
+        />
+        <Input
+          label="Note (optional)"
+          value={adminNote}
+          onChange={(e) => setAdminNote(e.target.value)}
+        />
+        {error && <p className="text-xs text-red-400">{error}</p>}
+        <div className="flex justify-end gap-2 pt-2">
+          <button type="button" onClick={onClose} className="btn-outline text-xs">
+            Cancel
+          </button>
+          <button type="submit" disabled={submitting} className="btn-gold text-xs">
+            {submitting ? "Approving…" : "Approve & credit"}
           </button>
         </div>
       </form>
