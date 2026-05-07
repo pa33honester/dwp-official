@@ -72,6 +72,7 @@ export default function DashboardPage() {
   const [assetMeta, setAssetMeta] = useState<Record<string, AssetMeta>>({});
   const [userId, setUserId] = useState<string | null>(null);
   const [withdrawOpen, setWithdrawOpen] = useState(false);
+  const [historyPage, setHistoryPage] = useState(0);
   const { address, connector, isConnected } = useAccount();
 
   useEffect(() => {
@@ -350,28 +351,72 @@ export default function DashboardPage() {
             No transactions yet.
           </p>
         ) : (
-          <div className="overflow-x-auto rounded-2xl border border-border bg-surface">
-            <table className="min-w-full text-sm">
-              <thead className="bg-elevated text-left text-xs uppercase tracking-wider text-zinc-400">
-                <tr>
-                  <th className="px-4 py-3">Date</th>
-                  <th className="px-4 py-3">Type</th>
-                  <th className="px-4 py-3">Asset</th>
-                  <th className="px-4 py-3">Amount</th>
-                  <th className="px-4 py-3">Details</th>
-                </tr>
-              </thead>
-              <tbody>
-                {ledger.map((entry) => (
-                  <LedgerRow
-                    key={`${entry.kind}-${entry.row.id}`}
-                    entry={entry}
-                    assetMeta={assetMeta}
-                  />
-                ))}
-              </tbody>
-            </table>
-          </div>
+          (() => {
+            const PAGE_SIZE = 3;
+            const totalPages = Math.max(1, Math.ceil(ledger.length / PAGE_SIZE));
+            const page = Math.min(historyPage, totalPages - 1);
+            const start = page * PAGE_SIZE;
+            const visible = ledger.slice(start, start + PAGE_SIZE);
+            return (
+              <>
+                <div className="overflow-x-auto rounded-2xl border border-border bg-surface">
+                  <table className="min-w-full text-sm">
+                    <thead className="bg-elevated text-left text-xs uppercase tracking-wider text-zinc-400">
+                      <tr>
+                        <th className="px-4 py-3">Date</th>
+                        <th className="px-4 py-3">Type</th>
+                        <th className="px-4 py-3">Asset</th>
+                        <th className="px-4 py-3">Amount</th>
+                        <th className="px-4 py-3">Details</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {visible.map((entry) => (
+                        <LedgerRow
+                          key={`${entry.kind}-${entry.row.id}`}
+                          entry={entry}
+                          assetMeta={assetMeta}
+                        />
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {totalPages > 1 && (
+                  <div className="mt-3 flex items-center justify-between text-xs text-zinc-400">
+                    <p>
+                      Showing <span className="text-white">{start + 1}</span>–
+                      <span className="text-white">{start + visible.length}</span>{" "}
+                      of <span className="text-white">{ledger.length}</span>
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setHistoryPage((p) => Math.max(0, p - 1))}
+                        disabled={page === 0}
+                        className="rounded-md border border-border bg-elevated px-3 py-1.5 text-zinc-300 transition enabled:hover:border-gold/40 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        ← Previous
+                      </button>
+                      <span className="px-1">
+                        Page <span className="text-white">{page + 1}</span> of{" "}
+                        <span className="text-white">{totalPages}</span>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setHistoryPage((p) => Math.min(totalPages - 1, p + 1))
+                        }
+                        disabled={page >= totalPages - 1}
+                        className="rounded-md border border-border bg-elevated px-3 py-1.5 text-zinc-300 transition enabled:hover:border-gold/40 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        Next →
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
+            );
+          })()
         )}
       </section>
 
