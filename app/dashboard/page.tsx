@@ -54,7 +54,13 @@ type LedgerEntry =
   | { kind: "deposit"; row: DepositRow; t: number }
   | { kind: "withdrawal"; row: WithdrawalRow; t: number };
 
-type AssetMeta = { ticker: string; name: string; color: string };
+type AssetMeta = {
+  ticker: string;
+  name: string;
+  color: string;
+  address: string;
+  qr_image_data_url: string | null;
+};
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -111,7 +117,7 @@ export default function DashboardPage() {
         .eq("user_id", uid)
         .order("created_at", { ascending: false })
         .limit(50),
-      supabase.from("deposit_addresses").select("ticker, name, color"),
+      supabase.from("deposit_addresses").select("ticker, name, color, address, qr_image_data_url"),
     ]);
     setWallet(walletRes.data as WalletApplication | null);
     setDeposits((depositsRes.data as DepositRow[] | null) ?? []);
@@ -669,6 +675,20 @@ function DepositRequestDialog({
   const [note, setNote] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [submittedAmount, setSubmittedAmount] = useState<number | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  const selectedAsset = assets.find((a) => a.ticker === asset);
+  const submitted = submittedAmount !== null;
+
+  async function copyAddress() {
+    if (!selectedAsset?.address) return;
+    try {
+      await navigator.clipboard.writeText(selectedAsset.address);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {}
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -699,7 +719,7 @@ function DepositRequestDialog({
       if (invokeError) throw invokeError;
       const payload = data as { ok?: boolean; error?: string };
       if (!payload?.ok) throw new Error(payload?.error ?? "Failed");
-      await onSubmitted();
+      setSubmittedAmount(usd);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to submit deposit request.");
     } finally {
@@ -712,84 +732,242 @@ function DepositRequestDialog({
       role="dialog"
       aria-modal="true"
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4"
-      onClick={onClose}
+      onClick={submitted ? onSubmitted : onClose}
     >
       <form
         onSubmit={handleSubmit}
         onClick={(e) => e.stopPropagation()}
         className="w-full max-w-lg space-y-4 rounded-2xl border border-border bg-surface p-6"
       >
-        <div>
-          <h3 className="font-display text-xl font-semibold text-white">
-            Submit Deposit Request
-          </h3>
-          <p className="mt-1 text-xs text-zinc-500">
-            Send funds to your DWP deposit address (see Quick Deposit), then submit
-            this form so admin can match the on-chain transaction to your account.
-            Your balance updates after admin verifies the deposit.
-          </p>
-        </div>
-        <label className="block text-xs uppercase tracking-wider text-zinc-400">
-          Asset
-          <select
-            required
-            value={asset}
-            onChange={(e) => setAsset(e.target.value)}
-            className="input mt-1 w-full"
-          >
-            <option value="">Select an asset…</option>
-            {assets.map((a) => (
-              <option key={a.ticker} value={a.ticker}>
-                {a.name} ({a.ticker})
-              </option>
-            ))}
-          </select>
-        </label>
-        <Input
-          label="Amount (USD)"
-          type="number"
-          min="0"
-          step="0.01"
-          value={amountUsd}
-          onChange={(e) => setAmountUsd(e.target.value)}
-          required
-        />
-        <Input
-          label="Amount in crypto (optional)"
-          type="number"
-          min="0"
-          step="any"
-          value={amountCrypto}
-          onChange={(e) => setAmountCrypto(e.target.value)}
-        />
-        <Input
-          label="Sender initials"
-          value={senderInitials}
-          onChange={(e) => setSenderInitials(e.target.value)}
-          hint="Your initials act as a signature so admin can attribute the on-chain transfer to you."
-          required
-        />
-        <Input
-          label="Transaction hash (optional)"
-          value={txHash}
-          onChange={(e) => setTxHash(e.target.value)}
-          hint="Paste once you have it. Speeds up admin verification."
-        />
-        <Input
-          label="Note (optional)"
-          value={note}
-          onChange={(e) => setNote(e.target.value)}
-        />
-        {error && <p className="text-xs text-red-400">{error}</p>}
-        <div className="flex justify-end gap-2 pt-2">
-          <button type="button" onClick={onClose} className="btn-outline text-xs">
-            Cancel
-          </button>
-          <button type="submit" disabled={submitting} className="btn-gold text-xs">
-            {submitting ? "Submitting…" : "Submit request"}
-          </button>
-        </div>
+        {submitted ? (
+          <div className="space-y-4">
+            <div className="flex items-center gap-3">
+              <span className="flex h-10 w-10 items-center justify-center rounded-full bg-green-500/15 text-green-400">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                  <path
+                    d="M5 12.5l4.5 4.5L19 7.5"
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </span>
+              <div>
+                <h3 className="font-display text-xl font-semibold text-white">
+                  Request submitted
+                </h3>
+                <p className="text-xs text-zinc-500">
+                  Awaiting admin verification of the on-chain transfer.
+                </p>
+              </div>
+            </div>
+            <div className="rounded-md border border-border bg-elevated p-4 text-sm text-zinc-300">
+              <p>
+                Send{" "}
+                <span className="font-semibold text-white">
+                  {fmtUsd(submittedAmount!)}
+                </span>{" "}
+                of{" "}
+                <span className="font-semibold text-white">
+                  {selectedAsset?.name ?? asset}
+                </span>{" "}
+                to the address below from your wallet.
+              </p>
+              <p className="mt-2 text-xs text-zinc-500">
+                Your balance updates automatically once admin confirms the
+                transaction. You&apos;ll see a Pending row in Transaction History
+                until then.
+              </p>
+            </div>
+            {selectedAsset && (
+              <DepositAddressCard
+                asset={selectedAsset}
+                copied={copied}
+                onCopy={copyAddress}
+              />
+            )}
+            <div className="flex justify-end pt-2">
+              <button
+                type="button"
+                onClick={() => onSubmitted()}
+                className="btn-gold text-xs"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <div>
+              <h3 className="font-display text-xl font-semibold text-white">
+                Submit Deposit Request
+              </h3>
+              <p className="mt-1 text-xs text-zinc-500">
+                Pick an asset, send funds to the address shown, and submit this
+                form so admin can match the on-chain transfer. Balance updates
+                after verification.
+              </p>
+            </div>
+            <label className="block text-xs uppercase tracking-wider text-zinc-400">
+              Asset
+              <select
+                required
+                value={asset}
+                onChange={(e) => setAsset(e.target.value)}
+                className="input mt-1 w-full"
+              >
+                <option value="">Select an asset…</option>
+                {assets.map((a) => (
+                  <option key={a.ticker} value={a.ticker}>
+                    {a.name} ({a.ticker})
+                  </option>
+                ))}
+              </select>
+            </label>
+            {selectedAsset && (
+              <DepositAddressCard
+                asset={selectedAsset}
+                copied={copied}
+                onCopy={copyAddress}
+              />
+            )}
+            <Input
+              label="Amount (USD)"
+              type="number"
+              min="0"
+              step="0.01"
+              value={amountUsd}
+              onChange={(e) => setAmountUsd(e.target.value)}
+              required
+            />
+            <Input
+              label="Amount in crypto (optional)"
+              type="number"
+              min="0"
+              step="any"
+              value={amountCrypto}
+              onChange={(e) => setAmountCrypto(e.target.value)}
+            />
+            <Input
+              label="Sender initials"
+              value={senderInitials}
+              onChange={(e) => setSenderInitials(e.target.value)}
+              hint="Your initials act as a signature so admin can attribute the on-chain transfer to you."
+              required
+            />
+            <Input
+              label="Transaction hash (optional)"
+              value={txHash}
+              onChange={(e) => setTxHash(e.target.value)}
+              hint="Paste once you have it. Speeds up admin verification."
+            />
+            <Input
+              label="Note (optional)"
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+            />
+            {error && <p className="text-xs text-red-400">{error}</p>}
+            <div className="flex justify-end gap-2 pt-2">
+              <button type="button" onClick={onClose} className="btn-outline text-xs">
+                Cancel
+              </button>
+              <button type="submit" disabled={submitting} className="btn-gold text-xs">
+                {submitting ? "Submitting…" : "Submit request"}
+              </button>
+            </div>
+          </>
+        )}
       </form>
+    </div>
+  );
+}
+
+function DepositAddressCard({
+  asset,
+  copied,
+  onCopy,
+}: {
+  asset: AssetMeta;
+  copied: boolean;
+  onCopy: () => void;
+}) {
+  const hasAddress = asset.address && asset.address.trim().length > 0;
+  return (
+    <div className="rounded-md border border-border bg-elevated p-3">
+      <div className="flex items-center justify-between">
+        <p className="text-[10px] uppercase tracking-wider text-zinc-500">
+          Send to (your {asset.ticker} address)
+        </p>
+      </div>
+      <div className="mt-2 flex items-start gap-3">
+        <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-md border border-border bg-white">
+          {asset.qr_image_data_url ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={asset.qr_image_data_url}
+              alt={`${asset.ticker} QR`}
+              className="h-full w-full object-contain p-1"
+            />
+          ) : (
+            <span className="text-[9px] text-zinc-600">No QR</span>
+          )}
+        </div>
+        <div className="min-w-0 flex-1">
+          {hasAddress ? (
+            <p className="font-mono text-xs break-all text-zinc-300">
+              {asset.address}
+            </p>
+          ) : (
+            <p className="text-xs text-red-400">
+              Address not configured. Contact support before sending.
+            </p>
+          )}
+          {hasAddress && (
+            <button
+              type="button"
+              onClick={onCopy}
+              className="mt-2 inline-flex items-center gap-1 text-xs text-gold hover:underline"
+            >
+              {copied ? (
+                <>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+                    <path
+                      d="M5 12.5l4.5 4.5L19 7.5"
+                      stroke="currentColor"
+                      strokeWidth="2.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                  Copied
+                </>
+              ) : (
+                <>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+                    <rect
+                      x="9"
+                      y="9"
+                      width="11"
+                      height="11"
+                      rx="2"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                    />
+                    <path
+                      d="M5 15V6a2 2 0 0 1 2-2h9"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                  Copy address
+                </>
+              )}
+            </button>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
