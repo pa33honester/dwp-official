@@ -8,8 +8,8 @@ import { Resend } from "https://esm.sh/resend@4.0.1";
 import { requestSchema } from "./_schemas.ts";
 
 const ALLOWED_ORIGINS = [
-  "https://dwpofficial.org",
-  "https://www.dwpofficial.org",
+  "https://dwpworldwide.org",
+  "https://www.dwpworldwide.org",
   "http://localhost:3000",
 ];
 

@@ -3,14 +3,14 @@
 // Deploy with: supabase functions deploy custody-inquiry
 // Secrets:
 //   supabase secrets set RESEND_API_KEY=re_...
-//   supabase secrets set CUSTODY_INQUIRY_TO=team@dwpofficial.net   (optional)
+//   supabase secrets set CUSTODY_INQUIRY_TO=team@dwpworldwide.org   (optional)
 
 import { Resend } from "https://esm.sh/resend@4.0.1";
 import { custodyInquirySchema, type CustodyInquiry } from "./_schemas.ts";
 
 const ALLOWED_ORIGINS = [
-  "https://dwpofficial.org",
-  "https://www.dwpofficial.org",
+  "https://dwpworldwide.org",
+  "https://www.dwpworldwide.org",
   "http://localhost:3000",
 ];
 
@@ -117,7 +117,7 @@ Deno.serve(async (req) => {
   const fromEmail =
     Deno.env.get("RESEND_FROM_EMAIL") ?? "DWP <onboarding@resend.dev>";
   const teamTo =
-    Deno.env.get("CUSTODY_INQUIRY_TO") ?? "team@dwpofficial.net";
+    Deno.env.get("CUSTODY_INQUIRY_TO") ?? "team@dwpworldwide.org";
 
   try {
     await resend.emails.send({

@@ -6,10 +6,8 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.10";
 
 export const ALLOWED_ORIGINS = [
-  "https://dwpofficial.org",
-  "https://www.dwpofficial.org",
-  "https://dwpofficial.net",
-  "https://www.dwpofficial.net",
+  "https://dwpworldwide.org",
+  "https://www.dwpworldwide.org",
   "http://localhost:3000",
 ];
 

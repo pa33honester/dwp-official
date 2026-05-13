@@ -1,5 +1,5 @@
 <p align="center">
-  <a href="https://dwpofficial.org">
+  <a href="https://dwpworldwide.org">
     <img src="public/dwp-logo.jpeg" alt="Digital Wealth Partners" width="360" />
   </a>
 </p>
@@ -12,7 +12,7 @@
 </p>
 
 <p align="center">
-  <a href="https://dwpofficial.org">dwpofficial.org</a>
+  <a href="https://dwpworldwide.org">dwpworldwide.org</a>
 </p>
 
 ---
@@ -37,7 +37,7 @@
 
 ## About the Platform
 
-**Digital Wealth Partners (DWP)** is a Registered Investment Advisor (RIA) specializing in digital assets and alternative investments. This repository contains the full production web platform that powers [dwpofficial.org](https://dwpofficial.org) — the public-facing marketing site, the authenticated **client portal**, and the internal **admin console** used by the DWP advisory team.
+**Digital Wealth Partners (DWP)** is a Registered Investment Advisor (RIA) specializing in digital assets and alternative investments. This repository contains the full production web platform that powers [dwpworldwide.org](https://dwpworldwide.org) — the public-facing marketing site, the authenticated **client portal**, and the internal **admin console** used by the DWP advisory team.
 
 The platform exists to solve a specific problem: bringing the operational standards expected by Family Offices, HNWIs, and other RIAs — KYC/AML, entity verification, custody, reporting, and approval workflows — to the cryptocurrency and blockchain-asset space, where most consumer-grade tools fall short of those expectations.
 
@@ -137,7 +137,7 @@ Security is treated as a first-class concern given the platform's audience and t
 
 ### CORS & abuse mitigation
 
-- Edge Functions enforce a strict **CORS origin allowlist** (`dwpofficial.org`, `www.dwpofficial.org`, `dwpofficial.net`, `www.dwpofficial.net`, plus localhost in dev) — cross-origin calls from arbitrary domains are rejected.
+- Edge Functions enforce a strict **CORS origin allowlist** (`dwpworldwide.org`, `www.dwpworldwide.org`, plus localhost in dev) — cross-origin calls from arbitrary domains are rejected.
 - Forms use Zod-based input validation on both the client and inside the Edge Function before any DB write.
 
 ### Wallet integration
@@ -158,7 +158,7 @@ Security is treated as a first-class concern given the platform's audience and t
 
 ### Reporting a vulnerability
 
-If you believe you've found a security issue, please email <security@dwpofficial.net> with reproduction steps. Do not open a public GitHub issue.
+If you believe you've found a security issue, please email <security@dwpworldwide.org> with reproduction steps. Do not open a public GitHub issue.
 
 ## Getting Started
 
@@ -204,14 +204,14 @@ supabase functions deploy custody-inquiry
 
 `.env.local` is **never committed**. The template lives in [.env.local.example](.env.local.example).
 
-| Variable                               | Where           | Purpose                                                        |
-| -------------------------------------- | --------------- | -------------------------------------------------------------- |
-| `NEXT_PUBLIC_SUPABASE_URL`             | client + server | Public Supabase project URL                                    |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY`        | client + server | Public anon key — safe to expose; RLS enforces access          |
-| `SUPABASE_SERVICE_ROLE_KEY`            | server only     | Bypasses RLS; used exclusively in Edge Functions               |
-| `RESEND_API_KEY`                       | server only     | Transactional email sender                                     |
-| `RESEND_FROM_EMAIL`                    | server only     | Verified sender address (e.g. `DWP <noreply@dwpofficial.net>`) |
-| `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` | client          | WalletConnect Cloud project ID for RainbowKit                  |
+| Variable                               | Where           | Purpose                                                         |
+| -------------------------------------- | --------------- | --------------------------------------------------------------- |
+| `NEXT_PUBLIC_SUPABASE_URL`             | client + server | Public Supabase project URL                                     |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY`        | client + server | Public anon key — safe to expose; RLS enforces access           |
+| `SUPABASE_SERVICE_ROLE_KEY`            | server only     | Bypasses RLS; used exclusively in Edge Functions                |
+| `RESEND_API_KEY`                       | server only     | Transactional email sender                                      |
+| `RESEND_FROM_EMAIL`                    | server only     | Verified sender address (e.g. `DWP <noreply@dwpworldwide.org>`) |
+| `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` | client          | WalletConnect Cloud project ID for RainbowKit                   |
 
 ## Scripts
 
@@ -248,7 +248,7 @@ supabase/
 
 ## Deployment
 
-Production: **[dwpofficial.org](https://dwpofficial.org)**
+Production: **[dwpworldwide.org](https://dwpworldwide.org)**
 
 Pipeline:
 
