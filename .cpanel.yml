@@ -1,6 +1,6 @@
 ---
 deployment:
   tasks:
-    - "/usr/bin/find /home/dwpoffic/public_html -mindepth 1 -maxdepth 1 ! -name cgi-bin ! -name .well-known ! -name .htaccess -exec /bin/rm -rf {} +"
-    - "/bin/cp -R /home/dwpoffic/repositories/dwp-official/. /home/dwpoffic/public_html/"
-    - "/bin/rm -rf /home/dwpoffic/public_html/.git /home/dwpoffic/public_html/.cpanel.yml"
+    - "/usr/bin/find /home/dwpoffic/dwpworldwide.org -mindepth 1 -maxdepth 1 ! -name cgi-bin ! -name .well-known ! -name .htaccess -exec /bin/rm -rf {} +"
+    - "/bin/cp -R /home/dwpoffic/repositories/dwp-official/. /home/dwpoffic/dwpworldwide.org/"
+    - "/bin/rm -rf /home/dwpoffic/dwpworldwide.org/.git /home/dwpoffic/dwpworldwide.org/.cpanel.yml"
